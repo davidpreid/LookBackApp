@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://lookbackcapsule.com/sitemap.xml
