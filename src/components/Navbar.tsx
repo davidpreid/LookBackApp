@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Telescope, Menu, X, Globe, DollarSign, Sparkles, Star, PenTool, BarChart, UserCircle, LogOut, Clock, TimerOff, BookOpen } from 'lucide-react';
+import { Telescope, Menu, X, Globe, DollarSign, Sparkles, Star, PenTool, BarChart, UserCircle, LogOut, Clock, TimerOff, BookOpen, History, LayoutDashboard, LineChart, Gift, Notebook, User, ArrowRightToLine, ArrowLeftToLine, Users, Heart, Award } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
+import { motion } from 'framer-motion';
 
 export default function Navbar() {
   const { user, signOut } = useAuth();
@@ -17,7 +18,6 @@ export default function Navbar() {
       navigate('/');
     } catch (error) {
       console.error('Sign out error:', error);
-      // Still navigate and show success since we cleaned up local state
       toast.success('Signed out successfully');
       navigate('/');
     }
@@ -29,7 +29,18 @@ export default function Navbar() {
         <div className="flex justify-between items-center h-16">
           <div className="flex-shrink-0 flex items-center">
             <Link to="/" className="flex items-center space-x-2 relative">
-              <Telescope className="h-6 w-6 text-indigo-600" />
+              <motion.div
+                animate={{
+                  rotate: [0, 10, -10, 0],
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  repeatType: "reverse",
+                }}
+              >
+                <Telescope className="h-6 w-6 text-indigo-600" />
+              </motion.div>
               <span className="text-lg font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent whitespace-nowrap">Look Back</span>
             </Link>
           </div>
@@ -40,16 +51,43 @@ export default function Navbar() {
               to="/public-board"
               onMouseEnter={() => setIsPublicBoardHovered(true)}
               onMouseLeave={() => setIsPublicBoardHovered(false)}
-              className={`relative flex items-center px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ${
-                isPublicBoardHovered ? 'scale-110' : ''
-              }`}
+              className="relative flex items-center px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300"
             >
-              <Globe className="h-5 w-5" />
+              <motion.div
+                animate={{
+                  scale: [1, 1.2, 1],
+                  rotate: [0, 5, -5, 0],
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  repeatType: "reverse",
+                }}
+              >
+                <Globe className="h-5 w-5" />
+              </motion.div>
               {isPublicBoardHovered && (
-                <span className="ml-2 text-sm font-medium whitespace-nowrap">
+                <motion.span
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -10 }}
+                  className="ml-2 text-sm font-medium whitespace-nowrap"
+                >
                   Public Board
-                </span>
+                </motion.span>
               )}
+              <motion.div
+                className="absolute -inset-1 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-full blur opacity-30"
+                animate={{
+                  scale: [1, 1.2, 1],
+                  opacity: [0.3, 0.5, 0.3],
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  repeatType: "reverse",
+                }}
+              />
             </Link>
           </div>
 
@@ -76,7 +114,7 @@ export default function Navbar() {
                   className="p-2 bg-white/50 hover:bg-white/80 text-gray-700 hover:text-indigo-600 rounded-xl transition-all duration-200 group relative"
                   title="Dashboard"
                 >
-                  <BookOpen className="h-5 w-5" />
+                  <LayoutDashboard className="h-5 w-5" />
                   <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     Dashboard
                   </span>
@@ -86,7 +124,7 @@ export default function Navbar() {
                   className="p-2 bg-white/50 hover:bg-white/80 text-gray-700 hover:text-indigo-600 rounded-xl transition-all duration-200 group relative"
                   title="Timeline"
                 >
-                  <Clock className="h-5 w-5" />
+                  <History className="h-5 w-5" />
                   <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     Timeline
                   </span>
@@ -96,7 +134,7 @@ export default function Navbar() {
                   className="p-2 bg-white/50 hover:bg-white/80 text-gray-700 hover:text-indigo-600 rounded-xl transition-all duration-200 group relative"
                   title="Analytics"
                 >
-                  <BarChart className="h-5 w-5" />
+                  <LineChart className="h-5 w-5" />
                   <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     Analytics
                   </span>
@@ -106,7 +144,7 @@ export default function Navbar() {
                   className="p-2 bg-white/50 hover:bg-white/80 text-gray-700 hover:text-indigo-600 rounded-xl transition-all duration-200 group relative"
                   title="Time Capsule"
                 >
-                  <TimerOff className="h-5 w-5" />
+                  <Gift className="h-5 w-5" />
                   <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     Time Capsule
                   </span>
@@ -116,7 +154,7 @@ export default function Navbar() {
                   className="p-2 bg-white/50 hover:bg-white/80 text-gray-700 hover:text-indigo-600 rounded-xl transition-all duration-200 group relative"
                   title="Journal"
                 >
-                  <PenTool className="h-5 w-5" />
+                  <Notebook className="h-5 w-5" />
                   <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     Journal
                   </span>
@@ -126,7 +164,7 @@ export default function Navbar() {
                   className="p-2 bg-white/50 hover:bg-white/80 text-gray-700 hover:text-indigo-600 rounded-xl transition-all duration-200 group relative"
                   title="Profile"
                 >
-                  <UserCircle className="h-5 w-5" />
+                  <User className="h-5 w-5" />
                   <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     Profile
                   </span>
@@ -136,7 +174,7 @@ export default function Navbar() {
                   className="p-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 rounded-xl transition-all duration-200 group relative"
                   title="Sign Out"
                 >
-                  <LogOut className="h-5 w-5" />
+                  <ArrowRightToLine className="h-5 w-5" />
                   <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     Sign Out
                   </span>
@@ -160,7 +198,7 @@ export default function Navbar() {
                     className="p-2 bg-white/50 hover:bg-white/80 text-gray-700 hover:text-indigo-600 rounded-xl transition-all duration-200 group relative"
                     title="Reviews"
                   >
-                    <Star className="h-5 w-5" />
+                    <Award className="h-5 w-5" />
                     <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                       Reviews
                     </span>
@@ -181,7 +219,7 @@ export default function Navbar() {
                   className="p-2 bg-white/50 hover:bg-white/80 text-gray-700 hover:text-indigo-600 rounded-xl transition-all duration-200 group relative"
                   title="Sign In"
                 >
-                  <UserCircle className="h-5 w-5" />
+                  <ArrowLeftToLine className="h-5 w-5" />
                   <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     Sign In
                   </span>
@@ -191,7 +229,7 @@ export default function Navbar() {
                   className="p-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 rounded-xl transition-all duration-200 group relative"
                   title="Sign Up"
                 >
-                  <LogOut className="h-5 w-5 rotate-180" />
+                  <ArrowRightToLine className="h-5 w-5 rotate-180" />
                   <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     Sign Up
                   </span>
@@ -213,7 +251,7 @@ export default function Navbar() {
                     onClick={() => setIsMenuOpen(false)}
                   >
                     <div className="flex items-center space-x-2">
-                      <History className="h-5 w-5" />
+                      <LayoutDashboard className="h-5 w-5" />
                       <span>Dashboard</span>
                     </div>
                   </Link>
@@ -223,7 +261,7 @@ export default function Navbar() {
                     onClick={() => setIsMenuOpen(false)}
                   >
                     <div className="flex items-center space-x-2">
-                      <Clock className="h-5 w-5" />
+                      <Gift className="h-5 w-5" />
                       <span>Time Capsule</span>
                     </div>
                   </Link>
@@ -233,7 +271,7 @@ export default function Navbar() {
                     onClick={() => setIsMenuOpen(false)}
                   >
                     <div className="flex items-center space-x-2">
-                      <BarChart className="h-5 w-5" />
+                      <LineChart className="h-5 w-5" />
                       <span>Analytics</span>
                     </div>
                   </Link>
@@ -243,7 +281,7 @@ export default function Navbar() {
                     onClick={() => setIsMenuOpen(false)}
                   >
                     <div className="flex items-center space-x-2">
-                      <PenTool className="h-5 w-5" />
+                      <Notebook className="h-5 w-5" />
                       <span>Journal</span>
                     </div>
                   </Link>
@@ -253,7 +291,7 @@ export default function Navbar() {
                     onClick={() => setIsMenuOpen(false)}
                   >
                     <div className="flex items-center space-x-2">
-                      <UserCircle className="h-5 w-5" />
+                      <User className="h-5 w-5" />
                       <span>Profile</span>
                     </div>
                   </Link>
@@ -265,7 +303,7 @@ export default function Navbar() {
                     className="w-full text-left px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-indigo-600 hover:bg-gray-50"
                   >
                     <div className="flex items-center space-x-2">
-                      <LogOut className="h-5 w-5" />
+                      <ArrowRightToLine className="h-5 w-5" />
                       <span>Sign Out</span>
                     </div>
                   </button>
@@ -289,7 +327,7 @@ export default function Navbar() {
                       onClick={() => setIsMenuOpen(false)}
                     >
                       <div className="flex items-center space-x-2">
-                        <Star className="h-5 w-5" />
+                        <Award className="h-5 w-5" />
                         <span>Reviews</span>
                       </div>
                     </Link>
