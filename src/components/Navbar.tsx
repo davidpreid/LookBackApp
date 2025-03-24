@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Telescope, Menu, X, Globe, DollarSign, Sparkles, Star, PenTool, BarChart, UserCircle, LogOut, Clock, TimerOff, BookOpen, History, LayoutDashboard, LineChart, Gift, Notebook, User, ArrowRightToLine, ArrowLeftToLine, Users, Heart, Award } from 'lucide-react';
+import { Telescope, Menu, X, Globe, DollarSign, Sparkles, Star, PenTool, BarChart, UserCircle, LogOut, Clock, TimerOff, BookOpen, History, LayoutDashboard, LineChart, Gift, Notebook, User, ArrowRightToLine, ArrowLeftToLine, Users, Heart, Award, LogIn } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
@@ -174,7 +174,7 @@ export default function Navbar() {
                   className="p-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 rounded-xl transition-all duration-200 group relative"
                   title="Sign Out"
                 >
-                  <ArrowRightToLine className="h-5 w-5" />
+                  <LogOut className="h-5 w-5" />
                   <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     Sign Out
                   </span>
@@ -219,7 +219,7 @@ export default function Navbar() {
                   className="p-2 bg-white/50 hover:bg-white/80 text-gray-700 hover:text-indigo-600 rounded-xl transition-all duration-200 group relative"
                   title="Sign In"
                 >
-                  <ArrowLeftToLine className="h-5 w-5" />
+                  <LogIn className="h-5 w-5" />
                   <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     Sign In
                   </span>
@@ -303,7 +303,7 @@ export default function Navbar() {
                     className="w-full text-left px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-indigo-600 hover:bg-gray-50"
                   >
                     <div className="flex items-center space-x-2">
-                      <ArrowRightToLine className="h-5 w-5" />
+                      <LogOut className="h-5 w-5" />
                       <span>Sign Out</span>
                     </div>
                   </button>

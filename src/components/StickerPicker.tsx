@@ -1,53 +1,52 @@
 import React from 'react';
-import { Smile } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 interface StickerPickerProps {
   onSelect: (sticker: string) => void;
   selectedStickers: string[];
 }
 
-const STICKER_CATEGORIES = [
+const stickerCategories = [
   {
     name: 'Emotions',
-    stickers: ['😊', '😂', '🥰', '😍', '🤗', '😎', '🥳', '😌']
+    stickers: ['😊', '😢', '😍', '😭', '😤', '😴', '😇', '😈', '😎', '😡']
   },
   {
     name: 'Activities',
-    stickers: ['🎮', '🎨', '📚', '🎵', '🎬', '⚽', '🎭', '🍳']
+    stickers: ['🎮', '🎨', '🎭', '🎪', '🎯', '🎲', '🎸', '🎹', '🎺', '🎻']
   },
   {
     name: 'Nature',
-    stickers: ['🌸', '🌈', '🌟', '🌙', '🌺', '🍀', '🌴', '🌊']
+    stickers: ['🌱', '🌲', '🌳', '🌴', '🌵', '🌷', '🌸', '🌹', '🌺', '🌻']
   },
   {
     name: 'Celebrations',
-    stickers: ['🎉', '🎂', '🎁', '🎊', '🎈', '🏆', '🥂', '✨']
+    stickers: ['🎉', '🎊', '🎈', '🎁', '🎂', '🎃', '🎄', '🎅', '🎆', '🎇']
   }
 ];
 
 export default function StickerPicker({ onSelect, selectedStickers }: StickerPickerProps) {
   return (
-    <div className="bg-white rounded-xl shadow-lg p-4 w-64">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-medium text-gray-900">Add Stickers</h3>
-        <Smile className="h-5 w-5 text-gray-400" />
-      </div>
-      
+    <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-4 w-80">
       <div className="space-y-4">
-        {STICKER_CATEGORIES.map(category => (
+        {stickerCategories.map((category) => (
           <div key={category.name}>
-            <h4 className="text-xs font-medium text-gray-500 mb-2">{category.name}</h4>
-            <div className="grid grid-cols-4 gap-2">
-              {category.stickers.map(sticker => (
-                <button
-                  key={sticker}
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">{category.name}</h3>
+            <div className="grid grid-cols-5 gap-2">
+              {category.stickers.map((sticker, index) => (
+                <motion.button
+                  key={`${category.name}-${sticker}-${index}`}
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.95 }}
                   onClick={() => onSelect(sticker)}
-                  className={`h-8 w-8 flex items-center justify-center rounded-lg text-xl hover:bg-gray-100 transition-colors ${
-                    selectedStickers.includes(sticker) ? 'bg-indigo-100' : ''
+                  className={`p-2 rounded-lg text-2xl transition-colors ${
+                    selectedStickers.includes(sticker)
+                      ? 'bg-indigo-50 text-indigo-600'
+                      : 'hover:bg-gray-50'
                   }`}
                 >
                   {sticker}
-                </button>
+                </motion.button>
               ))}
             </div>
           </div>

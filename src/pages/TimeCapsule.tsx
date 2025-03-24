@@ -1,15 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Lock, Unlock, Gift, Sparkles, Search, Plus, Users, Share2, CheckCircle2, Download, Trash2, Edit2, X, ChevronDown } from 'lucide-react';
+import { Clock, Lock, Unlock, Gift, Sparkles, Search, Plus, Users, Share2, CheckCircle2, Download, Trash2, Edit2, X, ChevronDown, Calendar, MapPin, Tag, Image } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import SEO from '../components/SEO';
 import ExportCapsule from '../components/ExportCapsule';
 import USBBackupModal from '../components/USBBackupModal';
-import toast from 'react-hot-toast';
+import { toast } from 'react-hot-toast';
 import { format, addYears, addMonths } from 'date-fns';
 import MemoryForm from '../components/MemoryForm';
 import { Memory, MemoryFormData } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import TimeCapsuleForm from '../components/TimeCapsuleForm';
+
+interface TimeCapsule {
+  id: string;
+  name: string;
+  description: string;
+  user_id: string;
+  created_at: string;
+  lock_until: string;
+  memory_count?: number;
+}
 
 interface Collaborator {
   email: string;
@@ -65,6 +76,8 @@ export default function TimeCapsule() {
   const [lockPeriodDropdownOpen, setLockPeriodDropdownOpen] = useState(false);
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [selectedForBackup, setSelectedForBackup] = useState<Memory[]>([]);
+  const [timeCapsules, setTimeCapsules] = useState<TimeCapsule[]>([]);
+  const [isCreating, setIsCreating] = useState(false);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -80,7 +93,10 @@ export default function TimeCapsule() {
   }, []);
 
   useEffect(() => {
-    fetchMemories();
+    if (user) {
+      fetchMemories();
+      fetchTimeCapsules();
+    }
   }, [user]);
 
   const fetchMemories = async () => {
@@ -103,14 +119,62 @@ export default function TimeCapsule() {
 
       if (unlockedError) throw unlockedError;
 
+      // Process attachments and generate signed URLs
+      const processMemories = async (memories: any[]) => {
+        return Promise.all(
+          memories.map(async (memory) => {
+            if (memory.metadata?.attachments) {
+              const attachmentsWithUrls = await Promise.all(
+                memory.metadata.attachments.map(async (attachment: { path?: string; url?: string; type: string; name: string }) => {
+                  if (attachment.path) {
+                    const { data: signedUrlData } = await supabase.storage
+                      .from('memory-images')
+                      .createSignedUrl(attachment.path, 3600); // URL expires in 1 hour
+                    
+                    if (!signedUrlData?.signedUrl) {
+                      console.error('Failed to generate signed URL for attachment:', attachment.path);
+                      return attachment;
+                    }
+                    
+                    return { ...attachment, url: signedUrlData.signedUrl };
+                  }
+                  return attachment;
+                })
+              );
+              return { ...memory, metadata: { ...memory.metadata, attachments: attachmentsWithUrls } };
+            }
+            return memory;
+          })
+        );
+      };
+
+      const processedLockedMemories = await processMemories(lockedData || []);
+      const processedUnlockedMemories = await processMemories(unlockedData || []);
+
       // Update both states
-      setMemories(lockedData || []);
-      setAvailableMemories(unlockedData || []);
+      setMemories(processedLockedMemories);
+      setAvailableMemories(processedUnlockedMemories);
     } catch (error) {
       console.error('Error fetching memories:', error);
-      toast.error('Error fetching time capsules');
+      toast.error('Failed to fetch memories');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTimeCapsules = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('time_capsules')
+        .select('*')
+        .eq('user_id', user?.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setTimeCapsules(data || []);
+    } catch (error) {
+      console.error('Error fetching time capsules:', error);
+      toast.error('Failed to fetch time capsules');
     }
   };
 
@@ -120,12 +184,19 @@ export default function TimeCapsule() {
   };
 
   const convertToMemoryFormData = (memory: Memory): MemoryFormData => {
+    // Convert memory attachments to form attachments
+    const attachments = memory.metadata?.attachments?.map(attachment => ({
+      name: attachment.name,
+      type: attachment.type,
+      size: 0, // We don't have the original file size
+      blob: new File([], attachment.name, { type: attachment.type }), // Create a dummy File object
+    })) || [];
+
     return {
       id: memory.id,
       title: memory.title,
       content: memory.content,
       category: memory.category,
-      description: memory.capsule_description || '',
       date: new Date(memory.created_at).toISOString().split('T')[0],
       location: memory.metadata?.location || '',
       mood: memory.metadata?.mood || '',
@@ -134,10 +205,14 @@ export default function TimeCapsule() {
       stickers: memory.metadata?.stickers || [],
       rating: memory.metadata?.rating || 0,
       tags: memory.metadata?.tags || [],
-      attachments: memory.metadata?.attachments || [],
+      attachments,
       sections: memory.metadata?.sections || [],
       capsule_name: memory.capsule_name || '',
       capsule_description: memory.capsule_description || '',
+      voiceNote: memory.voice_note ? {
+        url: memory.voice_note.url,
+        duration: memory.voice_note.duration,
+      } : undefined,
       metadata: {
         lockPeriod: memory.metadata?.lockPeriod || '1y',
         isAnimated: memory.metadata?.isAnimated || false
@@ -146,19 +221,31 @@ export default function TimeCapsule() {
   };
 
   const convertToMemory = (formData: MemoryFormData, userId: string): Omit<Memory, 'id' | 'created_at'> => {
-    const lockPeriod = LOCK_PERIODS.find(p => p.value === formData.metadata.lockPeriod);
+    const lockPeriod = LOCK_PERIODS.find(p => p.value === formData.metadata?.lockPeriod);
     const unlockDate = lockPeriod ? lockPeriod.fn(new Date()).toISOString() : null;
+
+    // Convert form attachments to memory attachments
+    const attachments = formData.attachments.map(attachment => ({
+      url: attachment.url || '', // Use the signed URL we generated during upload
+      type: attachment.type as 'image' | 'video' | 'audio',
+      name: attachment.name,
+      path: attachment.path // Include the path for future reference
+    }));
 
     return {
       title: formData.title,
       content: formData.content,
-      category: formData.category,
+      category: formData.category as 'movie' | 'tv_show' | 'achievement' | 'activity',
       user_id: userId,
       capsule_name: formData.capsule_name,
       capsule_description: formData.capsule_description,
       shared_with: [],
       is_public: false,
       unlock_date: unlockDate,
+      voice_note: formData.voiceNote ? {
+        url: formData.voiceNote.url,
+        duration: formData.voiceNote.duration,
+      } : undefined,
       metadata: {
         location: formData.location,
         mood: formData.mood,
@@ -167,10 +254,10 @@ export default function TimeCapsule() {
         stickers: formData.stickers,
         rating: formData.rating,
         tags: formData.tags,
-        attachments: formData.attachments,
+        attachments,
         sections: formData.sections,
-        lockPeriod: formData.metadata.lockPeriod,
-        isAnimated: formData.metadata.isAnimated
+        lockPeriod: formData.metadata?.lockPeriod,
+        isAnimated: formData.metadata?.isAnimated
       }
     };
   };
@@ -340,36 +427,58 @@ export default function TimeCapsule() {
     }
   };
 
-  const handleCreateTimeCapsule = async () => {
+  const handleCreateTimeCapsule = async (data: {
+    name: string;
+    description: string;
+    lockPeriod: string;
+    selectedMemories: Memory[];
+  }) => {
     try {
-      if (!user?.id) {
-        toast.error('You must be logged in to create a time capsule');
-        return;
-      }
+      // Create the time capsule
+      const { data: timeCapsule, error: timeCapsuleError } = await supabase
+        .from('time_capsules')
+        .insert([
+          {
+            name: data.name,
+            description: data.description,
+            user_id: user?.id,
+            lock_until: new Date(Date.now() + getLockPeriodInMs(data.lockPeriod)),
+          },
+        ])
+        .select()
+        .single();
 
-      if (selectedMemories.length === 0) {
-        toast.error('Please select at least one memory to include in the time capsule');
-        return;
-      }
+      if (timeCapsuleError) throw timeCapsuleError;
 
-      // Create memories for selected items
-      const { data: memoriesData, error: memoriesError } = await supabase
+      // Update selected memories to be locked
+      const { error: memoriesError } = await supabase
         .from('memories')
-        .insert(selectedMemories.map(memory => convertToMemory(convertToMemoryFormData(memory), user.id)))
-        .select();
+        .update({ is_locked: true, time_capsule_id: timeCapsule.id })
+        .in(
+          'id',
+          data.selectedMemories.map(m => m.id)
+        );
 
       if (memoriesError) throw memoriesError;
 
-      // Reset form
-      setSelectedMemories([]);
-      resetForm();
-
-      setShowSuccess(true);
       toast.success('Time capsule created successfully!');
+      setIsCreating(false);
+      fetchMemories();
+      fetchTimeCapsules();
     } catch (error) {
       console.error('Error creating time capsule:', error);
       toast.error('Failed to create time capsule');
     }
+  };
+
+  const getLockPeriodInMs = (period: string): number => {
+    const value = parseInt(period.slice(0, -1));
+    const unit = period.slice(-1);
+    const multipliers = {
+      m: 30 * 24 * 60 * 60 * 1000, // months
+      y: 365 * 24 * 60 * 60 * 1000, // years
+    };
+    return value * multipliers[unit as keyof typeof multipliers];
   };
 
   const resetForm = () => {
@@ -432,7 +541,7 @@ export default function TimeCapsule() {
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
             <button
-              onClick={() => setShowForm(!showForm)}
+              onClick={() => setIsCreating(true)}
               className="flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600
                        text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-300
                        hover:translate-y-[-1px] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
@@ -455,121 +564,86 @@ export default function TimeCapsule() {
         </div>
 
         {/* Form Section */}
-        {showForm && (
-          <div className="mb-8 bg-white/90 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/20">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 text-transparent bg-clip-text">
-                Create New Time Capsule
-              </h2>
-              <button
-                onClick={() => setShowForm(false)}
-                className="text-gray-400 hover:text-gray-500"
+        {isCreating ? (
+          <TimeCapsuleForm
+            memories={memories}
+            onSubmit={handleCreateTimeCapsule}
+            onCancel={() => setIsCreating(false)}
+          />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {timeCapsules.map((capsule) => (
+              <div
+                key={capsule.id}
+                className="bg-white rounded-2xl p-6 border border-gray-200 shadow-lg hover:shadow-xl
+                         transition-all duration-300"
               >
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-            <MemoryForm
-              categories={[
-                { category: 'movie', icon_name: 'Film', color: '#FF5733', description: 'Movies' },
-                { category: 'tv_show', icon_name: 'Tv', color: '#33FF57', description: 'TV Shows' },
-                { category: 'achievement', icon_name: 'Trophy', color: '#3357FF', description: 'Achievements' },
-                { category: 'activity', icon_name: 'Activity', color: '#FF33F5', description: 'Activities' }
-              ]}
-              initialData={newMemory}
-              onSubmit={handleSubmit}
-              onCancel={() => {
-                setShowForm(false);
-                resetForm();
-              }}
-            />
-          </div>
-        )}
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 bg-indigo-50 rounded-lg">
+                    <Gift className="h-5 w-5 text-indigo-600" />
+                  </div>
+                  <h2 className="text-xl font-semibold text-gray-900">{capsule.name}</h2>
+                </div>
 
-        {showCollaboratorsModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Add Collaborators
-              </h3>
-              <form onSubmit={handleAddCollaborator} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Collaborator Email
-                  </label>
-                  <input
-                    type="email"
-                    value={collaboratorEmail}
-                    onChange={(e) => setCollaboratorEmail(e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                    placeholder="Enter email address"
-                    required
-                  />
+                <p className="text-gray-600 mb-4 line-clamp-2">{capsule.description}</p>
+
+                {/* Display memory images */}
+                {(() => {
+                  const capsuleMemories = memories.filter(memory => memory.capsule_name === capsule.name);
+                  const hasImages = capsuleMemories.some(memory => 
+                    memory.metadata?.attachments?.some(attachment => attachment.type === 'image')
+                  );
+
+                  if (!hasImages) {
+                    return (
+                      <div className="text-center text-gray-500 text-sm mb-4">
+                        No images in this time capsule yet
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="grid grid-cols-2 gap-2 mb-4">
+                      {capsuleMemories.map(memory => (
+                        memory.metadata?.attachments?.map((attachment, index) => (
+                          attachment.type === 'image' && (
+                            <div key={`${memory.id}-${index}`} className="relative aspect-square overflow-hidden rounded-lg bg-gray-100">
+                              <img
+                                src={attachment.url}
+                                alt={attachment.name}
+                                className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 hover:scale-105"
+                              />
+                            </div>
+                          )
+                        ))
+                      ))}
+                    </div>
+                  );
+                })()}
+
+                <div className="flex items-center gap-3 p-4 bg-amber-50 rounded-xl border border-amber-100 mb-4">
+                  <div className="p-2 bg-amber-100 rounded-lg">
+                    <Lock className="h-5 w-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-amber-900">Locked Until</h3>
+                    <p className="text-sm text-amber-700">
+                      {format(new Date(capsule.lock_until), 'PPP')}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Role
-                  </label>
-                  <select
-                    value={collaboratorRole}
-                    onChange={(e) => setCollaboratorRole(e.target.value as 'viewer' | 'contributor')}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                  >
-                    <option value="viewer">Viewer</option>
-                    <option value="contributor">Contributor</option>
-                  </select>
+
+                <div className="flex items-center justify-between text-sm text-gray-500">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4" />
+                    <span>{format(new Date(capsule.created_at), 'MMM d, yyyy')}</span>
+                  </div>
+                  <span className="text-indigo-600 font-medium">
+                    {capsule.memory_count || 0} memories
+                  </span>
                 </div>
-                <div className="flex justify-end space-x-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowCollaboratorsModal(false)}
-                    className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                  >
-                    Add Collaborator
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-        
-        {/* Edit Memory Modal */}
-        {showEditForm && editingMemory && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Edit Memory</h3>
-                <button
-                  onClick={() => {
-                    setShowEditForm(false);
-                    setEditingMemory(null);
-                  }}
-                  className="text-gray-400 hover:text-gray-500"
-                >
-                  <X className="h-5 w-5" />
-                </button>
               </div>
-              <MemoryForm
-                categories={[
-                  { category: 'movie', icon_name: 'Film', color: '#FF5733', description: 'Movies' },
-                  { category: 'tv_show', icon_name: 'Tv', color: '#33FF57', description: 'TV Shows' },
-                  { category: 'achievement', icon_name: 'Trophy', color: '#3357FF', description: 'Achievements' },
-                  { category: 'activity', icon_name: 'Activity', color: '#FF33F5', description: 'Activities' }
-                ]}
-                initialData={editingMemory}
-                isEditing={true}
-                onSubmit={handleEditSubmit}
-                onCancel={() => {
-                  setShowEditForm(false);
-                  setEditingMemory(null);
-                }}
-              />
-            </div>
+            ))}
           </div>
         )}
 
@@ -582,177 +656,6 @@ export default function TimeCapsule() {
           onSelectMemory={handleBackupSelect}
           onBackupComplete={handleBackupComplete}
         />
-
-        {/* Time Capsules Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {memories.map((memory) => {
-            const unlocked = isUnlocked(memory.unlock_date!);
-            const showUnlockAnimation = unlocked && !memory.metadata.isAnimated;
-            const unlockDate = new Date(memory.unlock_date!);
-
-            return (
-              <div
-                key={memory.id}
-                className={`relative group bg-white/90 backdrop-blur-xl rounded-2xl shadow-xl border border-white/20
-                          transform transition-all duration-500 hover:shadow-2xl overflow-hidden
-                          ${showUnlockAnimation ? 'animate-unlock scale-105' : 'hover:scale-[1.02]'}`}
-                onClick={() => handleUnlock(memory)}
-              >
-                {/* Status Banner */}
-                <div className={`absolute top-0 left-0 right-0 h-2
-                              ${unlocked 
-                                ? 'bg-gradient-to-r from-emerald-400 to-teal-500' 
-                                : 'bg-gradient-to-r from-amber-400 to-orange-500'}`}
-                />
-
-                {/* Card Content */}
-                <div className="p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1 pr-4">
-                      <h3 className="text-xl font-semibold bg-gradient-to-r from-indigo-600 to-purple-600 text-transparent bg-clip-text">
-                        {memory.capsule_name || 'Time Capsule'}
-                      </h3>
-                      {memory.capsule_description && (
-                        <p className="text-sm text-gray-500 mt-1 line-clamp-2">
-                          {memory.capsule_description}
-                        </p>
-                      )}
-                    </div>
-                    <div className={`flex items-center justify-center w-10 h-10 rounded-xl flex-shrink-0
-                                  ${unlocked 
-                                    ? 'bg-gradient-to-br from-emerald-400 to-teal-500' 
-                                    : 'bg-gradient-to-br from-amber-400 to-orange-500'}`}
-                    >
-                      {unlocked ? (
-                        showUnlockAnimation ? (
-                          <Gift className="h-5 w-5 text-white animate-bounce" />
-                        ) : (
-                          <Unlock className="h-5 w-5 text-white" />
-                        )
-                      ) : (
-                        <Lock className="h-5 w-5 text-white" />
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Unlock Date */}
-                  <div className="mb-4">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <Clock className="h-4 w-4 text-gray-400" />
-                      <span className={`${unlocked ? 'text-emerald-600' : 'text-amber-600'}`}>
-                        {unlocked ? 'Unlocked' : `Unlocks on ${format(unlockDate, 'MMM d, yyyy')}`}
-                      </span>
-                    </div>
-                  </div>
-
-                  {unlocked ? (
-                    <>
-                      <div className="prose prose-sm max-w-none mb-4">
-                        <p className="text-gray-600 line-clamp-3">{memory.content}</p>
-                      </div>
-                      {memory.metadata.tags && memory.metadata.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mb-4">
-                          {memory.metadata.tags.slice(0, 3).map(tag => (
-                            <span
-                              key={tag}
-                              className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                       bg-indigo-50 text-indigo-600 border border-indigo-100"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                          {memory.metadata.tags.length > 3 && (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                         bg-gray-50 text-gray-600">
-                              +{memory.metadata.tags.length - 3}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="bg-gray-50 rounded-xl p-4 mb-4">
-                      <div className="text-center">
-                        <Lock className="h-6 w-6 text-gray-400 mx-auto mb-2" />
-                        <p className="text-sm text-gray-500">
-                          This time capsule is locked until {format(unlockDate, 'PPP')}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Card Footer */}
-                  <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-                    <span className="text-xs text-gray-500">
-                      Created {format(new Date(memory.created_at), 'MMM d, yyyy')}
-                    </span>
-                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all duration-200">
-                      {unlocked && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEdit(memory);
-                          }}
-                          className="p-1.5 bg-white hover:bg-gray-50 text-gray-700 hover:text-indigo-600 
-                                   rounded-full transition-all duration-200 shadow-sm hover:shadow-md"
-                          title="Edit Memory"
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </button>
-                      )}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(memory.id);
-                        }}
-                        className="p-1.5 bg-white hover:bg-gray-50 text-gray-700 hover:text-red-600 
-                                 rounded-full transition-all duration-200 shadow-sm hover:shadow-md"
-                        title="Delete Time Capsule"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedForBackup([memory]);
-                          setShowBackupModal(true);
-                        }}
-                        className="p-1.5 bg-white hover:bg-gray-50 text-gray-700 hover:text-emerald-600 
-                                 rounded-full transition-all duration-200 shadow-sm hover:shadow-md"
-                        title="Backup to USB"
-                      >
-                        <Download className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-
-          {memories.length === 0 && (
-            <div className="col-span-full">
-              <div className="text-center py-16">
-                <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-xl p-8 max-w-md mx-auto border border-white/20">
-                  <Gift className="h-12 w-12 text-indigo-500 mx-auto mb-4" />
-                  <h3 className="text-xl font-semibold text-gray-900 mb-2">No Time Capsules Yet</h3>
-                  <p className="text-gray-500 mb-6">
-                    Start preserving your precious memories for the future. Create your first time capsule now!
-                  </p>
-                  <button
-                    onClick={() => setShowForm(true)}
-                    className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600
-                             text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-300
-                             hover:translate-y-[-1px]"
-                  >
-                    <Plus className="h-5 w-5" />
-                    Create Your First Capsule
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );

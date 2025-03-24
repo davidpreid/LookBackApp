@@ -1,36 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Star, Tag, Paperclip, Edit2, Save, X, Palette, Image, Sticker, Clock, Grid, List } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Star, Tag, Paperclip, Edit2, Save, X, Palette, Image, Sticker, Clock, Grid, List, Share2, Lock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import SEO from '../components/SEO';
 import toast from 'react-hot-toast';
 import { format, startOfYear, endOfYear, getYear, parseISO, isSameDay } from 'date-fns';
-
-interface Memory {
-  id: string;
-  title: string;
-  content: string;
-  category: string;
-  created_at: string;
-  user_id: string;
-  shared_with?: string[];
-  is_public?: boolean;
-  metadata: {
-    rating?: number;
-    tags?: string[];
-    attachments?: {
-      url: string;
-      type: 'image' | 'video' | 'audio';
-      name: string;
-    }[];
-    theme?: {
-      color?: string;
-      font?: string;
-      stickers?: string[];
-      background?: string;
-    };
-  };
-}
+import MemoryContent from '../components/MemoryContent';
+import { Memory } from '../types';
 
 interface YearSummary {
   year: number;
@@ -148,8 +124,45 @@ export default function Timeline() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setMemories(data || []);
-      generateYearSummaries(data || []);
+
+      // Process attachments to generate signed URLs if needed
+      const processedMemories = await Promise.all((data || []).map(async (memory) => {
+        if (memory.metadata?.attachments) {
+          const processedAttachments = await Promise.all(
+            memory.metadata.attachments.map(async (attachment: { url?: string; path?: string; type: string; name: string }) => {
+              if (attachment.path && !attachment.url) {
+                try {
+                  const { data: signedUrlData } = await supabase.storage
+                    .from('memory-images')
+                    .createSignedUrl(attachment.path, 3600); // URL expires in 1 hour
+
+                  if (signedUrlData?.signedUrl) {
+                    return {
+                      ...attachment,
+                      url: signedUrlData.signedUrl
+                    };
+                  }
+                } catch (error) {
+                  console.error('Error generating signed URL:', error);
+                }
+              }
+              return attachment;
+            })
+          );
+
+          return {
+            ...memory,
+            metadata: {
+              ...memory.metadata,
+              attachments: processedAttachments
+            }
+          };
+        }
+        return memory;
+      }));
+
+      setMemories(processedMemories);
+      generateYearSummaries(processedMemories);
     } catch (error) {
       console.error('Error fetching memories:', error);
       toast.error('Error fetching memories');
@@ -236,20 +249,7 @@ export default function Timeline() {
                     )}
                   </div>
 
-                  <p className="text-gray-600 mb-4">{memory.content}</p>
-
-                  {memory.metadata.tags && memory.metadata.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mb-4">
-                      {memory.metadata.tags.map((tag, index) => (
-                        <span
-                          key={`${memory.id}-tag-${index}`}
-                          className="px-3 py-1.5 text-sm rounded-xl bg-white/50 backdrop-blur-sm text-gray-700"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  <MemoryContent memory={memory} className="mb-4" />
 
                   <div className="text-sm text-gray-500">
                     {format(new Date(memory.created_at), 'MMMM d, yyyy')}
@@ -392,10 +392,55 @@ export default function Timeline() {
                             {monthMemories.slice(0, 3).map(memory => (
                               <div
                                 key={memory.id}
-                                className="text-sm truncate text-gray-600 hover:text-gray-900 transition-colors"
+                                className="flex items-center justify-between text-sm text-gray-600 hover:text-gray-900 transition-colors"
                                 title={memory.title}
                               >
-                                {format(new Date(memory.created_at), 'd')} - {memory.title}
+                                <span className="truncate">
+                                  {format(new Date(memory.created_at), 'd')} - {memory.title}
+                                </span>
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      const { error } = await supabase
+                                        .from('memories')
+                                        .update({ is_public: !memory.is_public })
+                                        .eq('id', memory.id);
+
+                                      if (error) throw error;
+
+                                      // Update local state
+                                      setMemories(prevMemories =>
+                                        prevMemories.map(m =>
+                                          m.id === memory.id
+                                            ? { ...m, is_public: !m.is_public }
+                                            : m
+                                        )
+                                      );
+
+                                      toast.success(
+                                        memory.is_public
+                                          ? 'Memory removed from public board'
+                                          : 'Memory added to public board'
+                                      );
+                                    } catch (error) {
+                                      console.error('Error updating memory visibility:', error);
+                                      toast.error('Failed to update memory visibility');
+                                    }
+                                  }}
+                                  className={`ml-2 p-1 rounded-full transition-all duration-200 ${
+                                    memory.is_public
+                                      ? 'text-green-600 hover:bg-green-100'
+                                      : 'text-gray-400 hover:bg-gray-100'
+                                  }`}
+                                  title={memory.is_public ? 'Remove from public board' : 'Add to public board'}
+                                >
+                                  {memory.is_public ? (
+                                    <Share2 className="h-3 w-3" />
+                                  ) : (
+                                    <Lock className="h-3 w-3" />
+                                  )}
+                                </button>
                               </div>
                             ))}
                             {monthMemories.length > 3 && (
@@ -418,12 +463,12 @@ export default function Timeline() {
           <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-xl border border-white/20 overflow-hidden p-6">
             {memories.length > 0 ? (
               memories.reduce((acc, memory) => {
-                const photos = memory.metadata.attachments?.filter(a => a.type === 'image').map(a => a.url) || [];
+                const photos = memory.metadata.attachments?.filter(a => a.type.startsWith('image/')).map(a => a.url) || [];
                 return [...acc, ...photos]; 
               }, [] as string[]).length > 0 ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4 auto-rows-[200px]">
                   {memories.reduce((acc, memory) => {
-                    const photos = memory.metadata.attachments?.filter(a => a.type === 'image').map(a => a.url) || [];
+                    const photos = memory.metadata.attachments?.filter(a => a.type.startsWith('image/')).map(a => a.url) || [];
                     return [...acc, ...photos];
                   }, [] as string[])
                   .slice(0, 6)
@@ -437,8 +482,12 @@ export default function Timeline() {
                       <div className="absolute inset-0 bg-gradient-to-br from-black/20 to-black/0"></div>
                       <img
                         src={url}
-                        alt=""
+                        alt="Memory photo"
                         className="absolute inset-0 w-full h-full object-cover"
+                        onError={(e) => {
+                          console.error('Error loading image:', url);
+                          e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTkyMCIgaGVpZ2h0PSIxMDgwIiB2aWV3Qm94PSIwIDAgMTkyMCAxMDgwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxOTIwIiBoZWlnaHQ9IjEwODAiIGZpbGw9IiNFNUU1RTUiLz48dGV4dCB4PSI5NjAiIHk9IjU0MCIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjI0IiBmaWxsPSIjOTk5OTk5Ij5JbWFnZSBub3QgZm91bmQ8L3RleHQ+PC9zdmc+';
+                        }}
                       />
                     </div>
                   ))}
@@ -475,61 +524,71 @@ export default function Timeline() {
                       {/* Connector line */}
                       <div className={`absolute top-6 ${index % 2 === 0 ? '-left-4' : '-right-4'} w-4 h-0.5 bg-gradient-to-r from-indigo-200 to-purple-200`}></div>
                       
-                      <div className="bg-white/90 backdrop-blur-xl rounded-2xl border border-white/20 p-6 shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-[1.02]">
+                      <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-white/20 p-6 shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-[1.02]">
                         <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 via-purple-500/5 to-pink-500/5 rounded-2xl"></div>
                         <div className="relative">
                           <div className="flex justify-between items-start mb-4">
-                            <h4 className="text-xl font-semibold bg-gradient-to-r from-indigo-600 to-purple-600 text-transparent bg-clip-text">
+                            <h4 className="text-xl font-semibold text-gray-900">
                               {memory.title}
                             </h4>
-                            {memory.metadata.rating && (
-                              <div className="flex items-center">
-                                <Star className="h-5 w-5 text-yellow-400 fill-current" />
-                                <span className="ml-1 text-sm">{memory.metadata.rating}</span>
-                              </div>
-                            )}
+                            <div className="flex items-center gap-4">
+                              {memory.metadata.rating && (
+                                <div className="flex items-center">
+                                  <Star className="h-5 w-5 text-yellow-400 fill-current" />
+                                  <span className="ml-1 text-sm">{memory.metadata.rating}</span>
+                                </div>
+                              )}
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const { error } = await supabase
+                                      .from('memories')
+                                      .update({ is_public: !memory.is_public })
+                                      .eq('id', memory.id);
+
+                                    if (error) throw error;
+
+                                    // Update local state
+                                    setMemories(prevMemories =>
+                                      prevMemories.map(m =>
+                                        m.id === memory.id
+                                          ? { ...m, is_public: !m.is_public }
+                                          : m
+                                      )
+                                    );
+
+                                    toast.success(
+                                      memory.is_public
+                                        ? 'Memory removed from public board'
+                                        : 'Memory added to public board'
+                                    );
+                                  } catch (error) {
+                                    console.error('Error updating memory visibility:', error);
+                                    toast.error('Failed to update memory visibility');
+                                  }
+                                }}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all duration-200 ${
+                                  memory.is_public
+                                    ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                }`}
+                              >
+                                {memory.is_public ? (
+                                  <>
+                                    <Share2 className="h-4 w-4" />
+                                    Public
+                                  </>
+                                ) : (
+                                  <>
+                                    <Lock className="h-4 w-4" />
+                                    Private
+                                  </>
+                                )}
+                              </button>
+                            </div>
                           </div>
 
-                          <p className="text-gray-600 mb-4">{memory.content}</p>
-
-                          {memory.metadata.tags && memory.metadata.tags.length > 0 && (
-                            <div className="flex flex-wrap gap-2 mb-4">
-                              {memory.metadata.tags.map((tag, tagIndex) => (
-                                <span
-                                  key={`${memory.id}-tag-${tagIndex}`}
-                                  className="px-3 py-1.5 text-sm rounded-xl bg-white/50 backdrop-blur-sm text-gray-700 border border-white/20"
-                                >
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-
-                          {memory.metadata.attachments?.map((attachment, attachIndex) => (
-                            <div key={`${memory.id}-attach-${attachIndex}`} className="mb-4">
-                              {attachment.type === 'image' && (
-                                <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-gray-100 border border-white/20">
-                                  <img
-                                    src={attachment.url}
-                                    alt=""
-                                    className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 hover:scale-105"
-                                  />
-                                </div>
-                              )}
-                              {attachment.type === 'video' && (
-                                <video
-                                  src={attachment.url}
-                                  controls
-                                  className="w-full rounded-xl border border-white/20"
-                                />
-                              )}
-                              {attachment.type === 'audio' && (
-                                <div className="bg-white/50 backdrop-blur-sm p-4 rounded-xl border border-white/20">
-                                  <audio src={attachment.url} controls className="w-full" />
-                                </div>
-                              )}
-                            </div>
-                          ))}
+                          <MemoryContent memory={memory} className="mb-4" />
 
                           <div className="text-sm text-gray-500">
                             {format(new Date(memory.created_at), 'MMMM d, yyyy')}

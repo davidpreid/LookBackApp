@@ -28,6 +28,10 @@ export interface Memory {
     role: 'viewer' | 'contributor';
   }>;
   is_collaborative?: boolean;
+  voice_note?: {
+    url: string;
+    duration: number;
+  };
   metadata: {
     rating?: number;
     tags?: string[];
@@ -54,26 +58,27 @@ export interface Memory {
 }
 
 export interface MemoryFormData {
-  id: string;
+  id?: string;
   title: string;
   content: string;
-  category: 'movie' | 'tv_show' | 'achievement' | 'activity';
-  description: string;
+  category: string;
   date: string;
   location: string;
   mood: string;
-  weather: string;
-  people: string[];
+  weather?: string;
+  people?: string[];
   stickers: string[];
-  rating: number;
   tags: string[];
+  rating?: number;
   attachments: Array<{
-    url: string;
-    type: 'image' | 'video' | 'audio';
     name: string;
+    type: string;
+    size: number;
+    blob: Blob;
+    url?: string;
     path?: string;
   }>;
-  sections: Array<{
+  sections?: Array<{
     name: string;
     type: 'text' | 'list' | 'checkbox';
     placeholder?: string;
@@ -81,9 +86,14 @@ export interface MemoryFormData {
   }>;
   capsule_name?: string;
   capsule_description?: string;
-  metadata: {
-    lockPeriod: string;
-    isAnimated: boolean;
+  voiceNote?: {
+    url: string;
+    duration: number;
+    blob?: Blob;
+  };
+  metadata?: {
+    lockPeriod?: string;
+    isAnimated?: boolean;
   };
 }
 
@@ -93,4 +103,14 @@ export interface Attachment {
   name: string;
   path?: string;
   blob?: Blob;
+}
+
+export interface TimeCapsule {
+  id: string;
+  name: string;
+  description: string;
+  user_id: string;
+  created_at: string;
+  lock_until: string;
+  memory_count?: number;
 }

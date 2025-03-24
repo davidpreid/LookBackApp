@@ -5,29 +5,19 @@ import SEO from '../components/SEO';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import useEmblaCarousel from 'embla-carousel-react';
+import MemoryContent from '../components/MemoryContent';
+import { Memory } from '../types';
 
-interface Memory {
-  id: string;
-  title: string;
-  content: string;
-  category: string;
-  created_at: string;
-  user_id: string;
-  metadata: {
-    rating?: number;
-    tags?: string[];
-    attachments?: {
-      url: string;
-      type: 'image' | 'video' | 'audio';
-      name: string;
-    }[];
+interface PublicMemory extends Memory {
+  profiles?: {
+    full_name: string;
   };
 }
 
 export default function PublicBoard() {
-  const [memories, setMemories] = useState<Memory[]>([]);
+  const [memories, setMemories] = useState<PublicMemory[]>([]);
+  const [featuredMemories, setFeaturedMemories] = useState<PublicMemory[]>([]);
   const [loading, setLoading] = useState(true);
-  const [featuredMemories, setFeaturedMemories] = useState<Memory[]>([]);
   const [filter, setFilter] = useState<'recent' | 'popular'>('recent');
   const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true });
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -53,58 +43,78 @@ export default function PublicBoard() {
   }, [emblaApi]);
 
   useEffect(() => {
-    fetchPublicMemories();
-  }, [filter]);
+    fetchMemories();
+  }, []);
 
-  const fetchPublicMemories = async () => {
+  const fetchMemories = async () => {
     try {
-      let query = supabase
+      // First, fetch the memories
+      const { data: memoriesData, error: memoriesError } = await supabase
         .from('memories')
-        .select(`
-          *
-        `)
+        .select('*')
         .eq('is_public', true)
         .order('created_at', { ascending: false });
 
-      if (filter === 'popular') {
-        query = query.order('metadata->rating', { ascending: false });
-      }
+      if (memoriesError) throw memoriesError;
 
-      const { data, error } = await query;
-
-      if (error) throw error;
-      const allMemories = data || [];
-      setMemories(allMemories);
-      
-      // Set featured memories (those with high ratings or many interactions)
-      const featured = allMemories
-        .filter(memory => 
-          (memory.metadata.rating && memory.metadata.rating >= 4) ||
-          (memory.metadata.tags && memory.metadata.tags.length >= 3) ||
-          (memory.metadata.attachments && memory.metadata.attachments.length >= 2)
-        )
-        .sort((a, b) => (b.metadata.rating || 0) - (a.metadata.rating || 0))
-        .slice(0, 5);
-      
-      setFeaturedMemories(featured);
-      
-      // Fetch profiles for each memory
-      const { data: profiles, error: profileError } = await supabase
+      // Then, fetch the profiles for all users
+      const userIds = [...new Set((memoriesData || []).map(m => m.user_id))];
+      const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
         .select('id, full_name')
-        .in('id', data?.map(m => m.user_id) || []);
+        .in('id', userIds);
 
-      if (profileError) throw profileError;
+      if (profilesError) throw profilesError;
 
-      // Update memories with profile information
-      setMemories(data?.map(memory => ({
+      // Create a map of user profiles
+      const profileMap = (profilesData || []).reduce((acc, profile) => ({
+        ...acc,
+        [profile.id]: profile
+      }), {});
+
+      // Combine memories with profiles
+      const memoriesWithProfiles = (memoriesData || []).map(memory => ({
         ...memory,
-        profiles: profiles?.find(p => p.id === memory.user_id)
-      })) || []);
-      
+        profiles: profileMap[memory.user_id]
+      }));
+
+      // Get signed URLs for all attachments
+      const memoriesWithSignedUrls = await Promise.all(
+        memoriesWithProfiles.map(async (memory) => {
+          if (memory.metadata?.attachments) {
+            const attachmentsWithUrls = await Promise.all(
+              memory.metadata.attachments.map(async (attachment: { path?: string; url?: string; type: string; name: string }) => {
+                if (attachment.path) {
+                  try {
+                    const { data: signedUrlData } = await supabase.storage
+                      .from('memory-images')
+                      .createSignedUrl(attachment.path, 3600); // URL expires in 1 hour
+                    
+                    if (!signedUrlData?.signedUrl) {
+                      console.error('Failed to generate signed URL for attachment:', attachment.path);
+                      return attachment;
+                    }
+                    
+                    return { ...attachment, url: signedUrlData.signedUrl };
+                  } catch (error) {
+                    console.error('Error generating signed URL:', error);
+                    return attachment;
+                  }
+                }
+                return attachment;
+              })
+            );
+            return { ...memory, metadata: { ...memory.metadata, attachments: attachmentsWithUrls } };
+          }
+          return memory;
+        })
+      );
+
+      setMemories(memoriesWithSignedUrls);
+      setFeaturedMemories(memoriesWithSignedUrls.slice(0, 3));
     } catch (error) {
-      console.error('Error fetching public memories:', error);
-      toast.error('Failed to load public memories');
+      console.error('Error fetching memories:', error);
+      toast.error('Unable to load memories. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -173,7 +183,7 @@ export default function PublicBoard() {
               <div className="flex">
                 {featuredMemories.map((memory) => (
                   <div key={memory.id} className="flex-[0_0_100%] min-w-0 pl-4 sm:pl-8">
-                    <div className="bg-white/40 backdrop-blur-lg rounded-2xl border border-white/20 p-8 shadow-lg transition-all duration-300 hover:shadow-xl">
+                    <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-gray-200 p-8 shadow-lg transition-all duration-300 hover:shadow-xl">
                       <div className="flex items-center justify-between mb-6">
                         <div className="flex items-center space-x-3">
                           <Sparkles className="h-6 w-6 text-amber-500" />
@@ -188,34 +198,7 @@ export default function PublicBoard() {
                       </div>
                       
                       <h3 className="text-2xl font-bold text-gray-900 mb-4">{memory.title}</h3>
-                      <p className="text-gray-600 mb-6 text-lg">{memory.content}</p>
-                      
-                      {memory.metadata.attachments?.map((attachment, index) => (
-                        <div key={index} className="mb-6">
-                          {attachment.type === 'image' && (
-                            <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-gray-100">
-                              <img
-                                src={attachment.url}
-                                alt=""
-                                className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 hover:scale-105"
-                              />
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                      
-                      {memory.metadata.tags && memory.metadata.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mb-6">
-                          {memory.metadata.tags.map((tag, index) => (
-                            <span
-                              key={index}
-                              className="px-3 py-1 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      <MemoryContent memory={memory} className="text-gray-600 mb-6 text-lg" />
                       
                       <div className="flex items-center justify-between text-sm text-gray-500">
                         <div className="flex items-center">
@@ -294,50 +277,7 @@ export default function PublicBoard() {
                 )}
               </div>
 
-              <p className="text-gray-600 mb-4">{memory.content}</p>
-
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-medium text-gray-500 capitalize">
-                  {formatCategoryName(memory.category)}
-                </span>
-              </div>
-
-              {memory.metadata.attachments?.map((attachment, index) => (
-                <div key={`${memory.id}-attach-${index}`} className="mb-4">
-                  {attachment.type === 'image' && (
-                    <div className="relative aspect-video w-full overflow-hidden rounded-md bg-gray-100">
-                      <img
-                        src={attachment.url}
-                        alt=""
-                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 hover:scale-105"
-                      />
-                    </div>
-                  )}
-                  {attachment.type === 'video' && (
-                    <video
-                      src={attachment.url}
-                      controls
-                      className="w-full rounded-md"
-                    />
-                  )}
-                  {attachment.type === 'audio' && (
-                    <audio src={attachment.url} controls className="w-full" />
-                  )}
-                </div>
-              ))}
-
-              {memory.metadata.tags && memory.metadata.tags.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {memory.metadata.tags.map((tag, index) => (
-                    <span
-                      key={index}
-                      className="px-3 py-1 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800 group-hover:bg-indigo-200 transition-colors"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              )}
+              <MemoryContent memory={memory} className="text-gray-600 mb-4" />
 
               <div className="flex items-center justify-between text-sm text-gray-500">
                 <div className="flex items-center">

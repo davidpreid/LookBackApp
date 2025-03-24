@@ -6,49 +6,9 @@ import { useAuth } from '../contexts/AuthContext';
 import SEO from '../components/SEO';
 import toast from 'react-hot-toast';
 import MemoryForm from '../components/MemoryForm';
-import { CategoryMetadata } from '../types';
+import MemoryContent from '../components/MemoryContent';
+import { CategoryMetadata, Memory, MemoryFormData } from '../types';
 import { motion, AnimatePresence, AnimateSharedLayout } from 'framer-motion';
-
-interface Memory {
-  id: string;
-  title: string;
-  content: string;
-  category: string;
-  created_at: string;
-  user_id: string;
-  unlock_date?: string;
-  is_collaborative?: boolean;
-  metadata: {
-    rating?: number;
-    tags?: string[];
-    attachments?: {
-      url: string;
-      type: 'image' | 'video' | 'audio';
-      name: string;
-    }[];
-  };
-}
-
-interface MemoryFormData {
-  title: string;
-  content: string;
-  category: string;
-  metadata: {
-    rating?: number;
-    tags?: string[];
-    stickers?: string[];
-    attachments?: {
-      url: string;
-      type: 'image' | 'video' | 'audio';
-      name: string;
-    }[];
-    sections?: {
-      name: string;
-      type: string;
-      content: string | string[];
-    }[];
-  };
-}
 
 interface MemoryTemplate {
   id: string;
@@ -159,9 +119,41 @@ export default function Dashboard() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    fetchMemories();
-    fetchCategories();
-  }, [user]);
+    let isMounted = true;
+    let timeoutId: NodeJS.Timeout;
+
+    const loadData = async () => {
+      if (!user) return;
+      
+      try {
+        // Clear any existing timeout
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+
+        // Set a new timeout to debounce the fetch
+        timeoutId = setTimeout(async () => {
+          if (!isMounted) return;
+          
+          await Promise.all([
+            fetchMemories(),
+            fetchCategories()
+          ]);
+        }, 100); // 100ms debounce
+      } catch (error) {
+        console.error('Error loading data:', error);
+      }
+    };
+
+    loadData();
+
+    return () => {
+      isMounted = false;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [user?.id]); // Only depend on user.id instead of the entire user object
 
   useEffect(() => {
     if (memories.length > 0) {
@@ -217,7 +209,58 @@ export default function Dashboard() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setMemories(data || []);
+
+      console.log('Raw memories data:', data);
+
+      // Get signed URLs for all attachments
+      const memoriesWithSignedUrls = await Promise.all(
+        (data || []).map(async (memory) => {
+          if (memory.metadata?.attachments) {
+            console.log('Processing attachments for memory:', memory.id);
+            console.log('Original attachments:', memory.metadata.attachments);
+            
+            const attachmentsWithUrls = await Promise.all(
+              memory.metadata.attachments.map(async (attachment: { path?: string; url?: string; type: string; name: string }) => {
+                // If we already have a valid URL, use it
+                if (attachment.url) {
+                  console.log('Using existing URL:', attachment.url);
+                  return attachment;
+                }
+                
+                // Only generate a new signed URL if we have a path but no URL
+                if (attachment.path && !attachment.url) {
+                  console.log('Generating signed URL for path:', attachment.path);
+                  const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+                    .from('memory-images')
+                    .createSignedUrl(attachment.path, 3600);
+                  
+                  if (signedUrlError) {
+                    console.error('Error generating signed URL:', signedUrlError);
+                    return attachment;
+                  }
+                  
+                  if (!signedUrlData?.signedUrl) {
+                    console.error('No signed URL generated for attachment:', attachment.path);
+                    return attachment;
+                  }
+                  
+                  console.log('Generated signed URL:', signedUrlData.signedUrl);
+                  return { ...attachment, url: signedUrlData.signedUrl };
+                }
+                
+                return attachment;
+              })
+            );
+            
+            console.log('Processed attachments:', attachmentsWithUrls);
+            return { ...memory, metadata: { ...memory.metadata, attachments: attachmentsWithUrls } };
+          }
+          return memory;
+        })
+      );
+
+      console.log('Final processed memories:', memoriesWithSignedUrls);
+      setMemories(memoriesWithSignedUrls);
     } catch (error) {
       console.error('Error fetching memories:', error);
       toast.error('Unable to load memories. Please try again.');
@@ -226,23 +269,61 @@ export default function Dashboard() {
     }
   };
 
-  const handleSubmit = async (formData: any) => {
+  const handleSubmit = async (formData: MemoryFormData) => {
     try {
-      const { error } = await supabase
+      if (!user?.id) {
+        toast.error('You must be logged in to create a memory');
+        return;
+      }
+
+      console.log('Form data before processing:', formData);
+      console.log('Attachments before processing:', formData.attachments);
+
+      // Transform form data into database format
+      const memoryData = {
+        title: formData.title,
+        content: formData.content,
+        category: formData.category || 'note', // Default to 'note' if no category selected
+        user_id: user.id,
+        shared_with: [],
+        is_public: false,
+        metadata: {
+          location: formData.location,
+          mood: formData.mood,
+          stickers: formData.stickers,
+          tags: [...new Set(formData.tags)], // Deduplicate tags
+          attachments: formData.attachments
+            .filter(att => att.url) // Only include attachments that have a URL
+            .map(att => ({
+              name: att.name,
+              type: att.type,
+              url: att.url,
+              path: att.path
+            }))
+        }
+      };
+
+      console.log('Memory data before submission:', memoryData);
+      console.log('Attachments before submission:', memoryData.metadata.attachments);
+
+      const { data, error } = await supabase
         .from('memories')
-        .insert([{
-          ...formData,
-          user_id: user?.id,
-          shared_with: [],
-          is_public: false
-        }]);
+        .insert([memoryData])
+        .select()
+        .single();
 
       if (error) throw error;
 
+      console.log('Memory created:', data);
+      console.log('Memory attachments after creation:', data.metadata?.attachments);
+
+      // Add the memory to the state
+      setMemories(prevMemories => [data, ...prevMemories]);
+
       toast.success('Memory added successfully');
       setShowForm(false);
-      fetchMemories();
     } catch (error) {
+      console.error('Error adding memory:', error);
       toast.error('Error adding memory');
     }
   };
@@ -256,14 +337,29 @@ export default function Dashboard() {
     try {
       if (!user?.id || !editingMemory) return;
 
+      // Transform form data into database format
+      const memoryData = {
+        title: formData.title,
+        content: formData.content,
+        category: formData.category,
+        metadata: {
+          ...formData.metadata,
+          tags: [...new Set(formData.tags)], // Deduplicate tags
+          attachments: formData.attachments.map((att: any) => ({
+            name: att.name,
+            type: att.type,
+            path: att.path, // Store the path for future reference
+            url: att.url || '', // Ensure URL is never undefined
+            blob: undefined // Don't store blob in database
+          })).filter((att: any) => att.path && att.url) // Only include attachments with both path and URL
+        }
+      };
+
+      console.log('Updating memory with data:', memoryData);
+
       const { error } = await supabase
         .from('memories')
-        .update({
-          title: formData.title,
-          content: formData.content,
-          category: formData.category,
-          metadata: formData.metadata
-        })
+        .update(memoryData)
         .eq('id', editingMemory.id);
 
       if (error) throw error;
@@ -273,6 +369,7 @@ export default function Dashboard() {
       setEditingMemory(null);
       fetchMemories();
     } catch (error) {
+      console.error('Error updating memory:', error);
       toast.error('Error updating memory');
     }
   };
@@ -300,17 +397,16 @@ export default function Dashboard() {
     const newTransformedTemplate: MemoryFormData = {
       title: template.title,
       content: template.content,
-      category: template.category,
+      category: template.category as 'movie' | 'tv_show' | 'achievement' | 'activity' | '',
+      date: new Date().toISOString().split('T')[0],
+      location: '',
+      mood: '',
+      stickers: [],
+      tags: template.metadata.tags || [],
+      attachments: [],
       metadata: {
-        rating: 0,
-        tags: template.metadata.tags || [],
-        stickers: [],
-        attachments: [],
-        sections: template.metadata.sections?.map(section => ({
-          name: section.name,
-          type: section.type,
-          content: section.type === 'list' ? [] : ''
-        }))
+        lockPeriod: undefined,
+        isAnimated: false
       }
     };
     setTransformedTemplate(newTransformedTemplate);
@@ -495,11 +591,11 @@ export default function Dashboard() {
                   transition={{ delay: index * 0.1 }}
                   className="group relative"
                 >
-                  <div className="absolute inset-0 bg-gradient-to-br from-white/80 to-white/40 backdrop-blur-xl rounded-2xl border border-white/20 shadow-xl transition-all duration-300 group-hover:shadow-2xl"></div>
+                  <div className="absolute inset-0 bg-gradient-to-br from-white/95 to-white/90 backdrop-blur-md rounded-2xl border border-gray-200 shadow-xl transition-all duration-300 group-hover:shadow-2xl"></div>
                   <div className="relative p-6">
                     {memory.unlock_date && (
                       <div className="absolute inset-0 flex items-center justify-center bg-gray-900/10 backdrop-blur-[2px] rounded-2xl">
-                        <div className="flex items-center space-x-2 px-4 py-2 bg-white/80 backdrop-blur-sm rounded-full shadow-lg">
+                        <div className="flex items-center space-x-2 px-4 py-2 bg-white/90 backdrop-blur-sm rounded-full shadow-lg">
                           <Lock className="h-5 w-5 text-amber-600" />
                           <span className="text-sm font-medium text-gray-900">
                             Locked until {format(new Date(memory.unlock_date), 'PPP')}
@@ -532,55 +628,7 @@ export default function Dashboard() {
                       </div>
                     </div>
 
-                    <p className="text-gray-600 mb-4 line-clamp-3">{memory.content}</p>
-
-                    {memory.metadata?.tags && memory.metadata.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-4">
-                        {memory.metadata.tags.map((tag, tagIndex) => (
-                          <motion.span
-                            key={`${memory.id}-tag-${tagIndex}`}
-                            className="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-pink-500/10 backdrop-blur-sm border border-white/20 text-indigo-700 shadow-sm hover:shadow-md transition-all duration-200"
-                            whileHover={{ scale: 1.05 }}
-                          >
-                            {tag}
-                          </motion.span>
-                        ))}
-                      </div>
-                    )}
-
-                    {memory.metadata?.attachments && memory.metadata.attachments.length > 0 && (
-                      <div className="space-y-2 mb-4">
-                        {memory.metadata.attachments.map((attachment, attIndex) => (
-                          <motion.div
-                            key={`${memory.id}-attachment-${attIndex}`}
-                            className="relative rounded-xl overflow-hidden bg-gray-100"
-                            whileHover={{ scale: 1.02 }}
-                          >
-                            {attachment.type === 'image' && (
-                              <img
-                                src={attachment.url}
-                                alt=""
-                                className="w-full h-48 object-cover transition-transform duration-300 hover:scale-105"
-                              />
-                            )}
-                            {attachment.type === 'video' && (
-                              <video
-                                src={attachment.url}
-                                controls
-                                className="w-full rounded-xl"
-                              />
-                            )}
-                            {attachment.type === 'audio' && (
-                              <audio
-                                src={attachment.url}
-                                controls
-                                className="w-full"
-                              />
-                            )}
-                          </motion.div>
-                        ))}
-                      </div>
-                    )}
+                    <MemoryContent memory={memory} className="mb-4" />
 
                     <div className="flex items-center justify-between text-sm text-gray-500">
                       <span>{format(new Date(memory.created_at), 'PPP')}</span>
@@ -622,7 +670,7 @@ export default function Dashboard() {
                   stiffness: 260,
                   damping: 20 
                 }}
-                className="bg-white/90 backdrop-blur-xl rounded-2xl border border-white/20 shadow-xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto modal-scroll"
+                className="bg-white/95 backdrop-blur-md rounded-2xl border border-gray-200 shadow-xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto modal-scroll"
                 onClick={e => e.stopPropagation()}
               >
                 <motion.div
@@ -670,8 +718,22 @@ export default function Dashboard() {
                     className={`relative ${isSubmitting ? 'form-loading' : ''}`}
                   >
                     <MemoryForm
-                      categories={categories}
-                      initialData={editingMemory || transformedTemplate || undefined}
+                      initialData={editingMemory ? {
+                        ...editingMemory,
+                        date: new Date(editingMemory.created_at).toISOString().split('T')[0],
+                        location: editingMemory.metadata.location || '',
+                        mood: editingMemory.metadata.mood || '',
+                        stickers: editingMemory.metadata.stickers || [],
+                        tags: editingMemory.metadata.tags || [],
+                        attachments: editingMemory.metadata.attachments?.map(att => ({
+                          name: att.name,
+                          type: att.type,
+                          size: 0,
+                          blob: new Blob(),
+                          url: att.url,
+                          path: att.path
+                        })) || [],
+                      } : transformedTemplate || undefined}
                       isEditing={!!editingMemory}
                       onSubmit={async (data) => {
                         setIsSubmitting(true);
@@ -686,7 +748,6 @@ export default function Dashboard() {
                         setEditingMemory(null);
                         setSelectedTemplate(null);
                       }}
-                      template={selectedTemplate}
                     />
                   </motion.div>
                 </motion.div>
@@ -718,7 +779,7 @@ export default function Dashboard() {
                   stiffness: 260,
                   damping: 20 
                 }}
-                className="bg-white/90 backdrop-blur-xl rounded-2xl border border-white/20 shadow-xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto modal-scroll"
+                className="bg-white/95 backdrop-blur-md rounded-2xl border border-gray-200 shadow-xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto modal-scroll"
                 onClick={e => e.stopPropagation()}
               >
                 <motion.div
@@ -752,8 +813,22 @@ export default function Dashboard() {
                     className={`relative ${isSubmitting ? 'form-loading' : ''}`}
                   >
                     <MemoryForm
-                      categories={categories}
-                      initialData={editingMemory}
+                      initialData={{
+                        ...editingMemory,
+                        date: new Date(editingMemory.created_at).toISOString().split('T')[0],
+                        location: editingMemory.metadata.location || '',
+                        mood: editingMemory.metadata.mood || '',
+                        stickers: editingMemory.metadata.stickers || [],
+                        tags: editingMemory.metadata.tags || [],
+                        attachments: editingMemory.metadata.attachments?.map(att => ({
+                          name: att.name,
+                          type: att.type,
+                          size: 0,
+                          blob: new Blob(),
+                          url: att.url,
+                          path: att.path
+                        })) || [],
+                      }}
                       isEditing={true}
                       onSubmit={async (data) => {
                         setIsSubmitting(true);

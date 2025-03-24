@@ -27,6 +27,7 @@ import {
   AlignCenter,
   AlignRight,
   List,
+  ListOrdered,
   Heading,
   Link as LinkIcon,
   Type,
@@ -40,7 +41,9 @@ import {
   X,
   ChevronDown,
   Sun,
-  Moon
+  Moon,
+  Undo,
+  Redo
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -120,7 +123,9 @@ export default function RichTextEditor({ content, onChange }: RichTextEditorProp
   
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({
+        codeBlock: false,
+      }),
       FontFamily,
       TextStyle,
       Color,
@@ -131,6 +136,10 @@ export default function RichTextEditor({ content, onChange }: RichTextEditorProp
       }),
       Link.configure({
         openOnClick: false,
+        HTMLAttributes: {
+          rel: 'noopener noreferrer',
+          class: 'text-indigo-600 hover:text-indigo-800 underline',
+        },
       }),
       Image.configure({
         inline: true,
@@ -176,13 +185,13 @@ export default function RichTextEditor({ content, onChange }: RichTextEditorProp
       const fileName = `${Math.random().toString(36).slice(2)}.${fileExt}`;
       
       const { data, error } = await supabase.storage
-        .from('journal-images')
+        .from('memory-images')
         .upload(fileName, file);
 
       if (error) throw error;
 
       const { data: { publicUrl } } = supabase.storage
-        .from('journal-images')
+        .from('memory-images')
         .getPublicUrl(fileName);
 
       editor.chain().focus().setImage({ src: publicUrl }).run();
@@ -292,13 +301,13 @@ export default function RichTextEditor({ content, onChange }: RichTextEditorProp
           <List className="w-4 h-4" />
         </button>
         <button
-          onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+          onClick={() => editor.chain().focus().toggleOrderedList().run()}
           className={`p-2 rounded ${currentTheme.hover} ${
-            editor.isActive('heading', { level: 2 }) ? currentTheme.active : ''
+            editor.isActive('orderedList') ? currentTheme.active : ''
           }`}
-          title="Heading"
+          title="Numbered List"
         >
-          <Heading className="w-4 h-4" />
+          <ListOrdered className="w-4 h-4" />
         </button>
 
         {/* Divider */}
@@ -422,6 +431,28 @@ export default function RichTextEditor({ content, onChange }: RichTextEditorProp
           ) : (
             <Palette className="w-4 h-4" />
           )}
+        </button>
+
+        {/* Undo */}
+        <button
+          onClick={() => editor.chain().focus().undo().run()}
+          className={`p-2 rounded ${currentTheme.hover} ${
+            !editor.can().undo() ? 'opacity-50 cursor-not-allowed' : ''
+          }`}
+          title="Undo"
+        >
+          <Undo className="w-4 h-4" />
+        </button>
+
+        {/* Redo */}
+        <button
+          onClick={() => editor.chain().focus().redo().run()}
+          className={`p-2 rounded ${currentTheme.hover} ${
+            !editor.can().redo() ? 'opacity-50 cursor-not-allowed' : ''
+          }`}
+          title="Redo"
+        >
+          <Redo className="w-4 h-4" />
         </button>
       </div>
 

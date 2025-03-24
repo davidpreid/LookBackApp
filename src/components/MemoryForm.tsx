@@ -1,950 +1,709 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Star, Tag, Paperclip, Sticker, List, CheckSquare, Image, Upload, X, Mic, ChefHat, PartyPopper, Plane, Trophy, Trash2, ChevronDown, Lock, Gift } from 'lucide-react';
-import { CategoryMetadata, MemoryFormData, Attachment } from '../types';
+import React, { useState, useRef, useEffect } from 'react';
+import { Calendar, MapPin, Tag, Image, X, Mic, Square, Play, Pause, Smile, Link as LinkIcon, Upload } from 'lucide-react';
+import { Memory, MemoryFormData, CategoryMetadata } from '../types';
+import RichTextEditor from './RichTextEditor';
 import StickerPicker from './StickerPicker';
 import { supabase } from '../lib/supabase';
-import { v4 as uuidv4 } from 'uuid';
 import toast from 'react-hot-toast';
-import { motion, AnimatePresence } from 'framer-motion';
-import { createClient } from '@supabase/supabase-js';
-import * as tus from 'tus-js-client';
-import VoiceRecorder from './VoiceRecorder';
-import { format, add } from 'date-fns';
-
-interface MemoryTemplate {
-  id: string;
-  name: string;
-  icon: React.ReactNode;
-  category: string;
-  title: string;
-  content: string;
-  metadata: {
-    tags: string[];
-    sections: {
-      name: string;
-      type: 'text' | 'list' | 'checkbox';
-      placeholder?: string;
-      content?: string | string[];
-    }[];
-  };
-}
 
 interface MemoryFormProps {
   initialData?: MemoryFormData;
   isEditing?: boolean;
   onSubmit: (data: MemoryFormData) => Promise<void>;
   onCancel: () => void;
-  template?: MemoryTemplate | null;
-  categories: {
-    category: string;
-    icon_name: string;
-    color: string;
-    description: string;
-  }[];
 }
 
-const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-const ACCEPTED_AUDIO_TYPES = ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/webm'];
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
-
-interface UploadProgressEvent {
-  bytesUploaded: number;
-  bytesTotal: number;
-}
-
-export const MEMORY_TEMPLATES: MemoryTemplate[] = [
-  {
-    id: 'recipe',
-    name: 'Recipe',
-    icon: <ChefHat className="h-6 w-6" />,
-    category: 'food',
-    title: 'New Recipe',
-    content: 'Write about your cooking experience...',
-    metadata: {
-      tags: ['recipe', 'cooking'],
-      sections: [
-        {
-          name: 'Ingredients',
-          type: 'list',
-          placeholder: 'Add an ingredient'
-        },
-        {
-          name: 'Instructions',
-          type: 'list',
-          placeholder: 'Add a step'
-        },
-        {
-          name: 'Cooking Time',
-          type: 'text',
-          placeholder: 'How long did it take to prepare?'
-        },
-        {
-          name: 'Difficulty Level',
-          type: 'text',
-          placeholder: 'Easy, Medium, or Hard'
-        },
-        {
-          name: 'Success Rating',
-          type: 'text',
-          placeholder: 'How did it turn out? (1-5 stars)'
-        }
-      ]
-    }
-  },
-  {
-    id: 'special-occasion',
-    name: 'Special Occasion',
-    icon: <PartyPopper className="h-6 w-6" />,
-    category: 'celebration',
-    title: 'Special Day',
-    content: 'Capture the details of this special moment...',
-    metadata: {
-      tags: ['celebration', 'special'],
-      sections: [
-        {
-          name: 'Event Type',
-          type: 'text',
-          placeholder: 'Birthday, Anniversary, etc.'
-        },
-        {
-          name: 'People Present',
-          type: 'list',
-          placeholder: 'Add a person'
-        },
-        {
-          name: 'Highlights',
-          type: 'list',
-          placeholder: 'Add a memorable moment'
-        },
-        {
-          name: 'Gifts',
-          type: 'list',
-          placeholder: 'Add a gift received/given'
-        }
-      ]
-    }
-  },
-  {
-    id: 'travel',
-    name: 'Travel Memory',
-    icon: <Plane className="h-6 w-6" />,
-    category: 'travel',
-    title: 'Travel Adventure',
-    content: 'Document your journey and experiences...',
-    metadata: {
-      tags: ['travel', 'adventure'],
-      sections: [
-        {
-          name: 'Destination',
-          type: 'text',
-          placeholder: 'Where did you go?'
-        },
-        {
-          name: 'Places Visited',
-          type: 'list',
-          placeholder: 'Add a place you visited'
-        },
-        {
-          name: 'Activities',
-          type: 'list',
-          placeholder: 'Add an activity'
-        },
-        {
-          name: 'Food Highlights',
-          type: 'list',
-          placeholder: 'Add a memorable meal or dish'
-        },
-        {
-          name: 'Travel Tips',
-          type: 'list',
-          placeholder: 'Add a useful tip'
-        }
-      ]
-    }
-  },
-  {
-    id: 'achievement',
-    name: 'Achievement',
-    icon: <Trophy className="h-6 w-6" />,
-    category: 'milestone',
-    title: 'Personal Achievement',
-    content: 'Record your accomplishment...',
-    metadata: {
-      tags: ['achievement', 'milestone'],
-      sections: [
-        {
-          name: 'Achievement Type',
-          type: 'text',
-          placeholder: 'Academic, Professional, Personal, etc.'
-        },
-        {
-          name: 'Goals Met',
-          type: 'list',
-          placeholder: 'Add a goal you achieved'
-        },
-        {
-          name: 'Challenges Overcome',
-          type: 'list',
-          placeholder: 'Add a challenge you faced'
-        },
-        {
-          name: 'Next Steps',
-          type: 'list',
-          placeholder: 'Add your next goal'
-        }
-      ]
-    }
-  }
-];
-
-const addTime = (date: Date, period: string): Date => {
-  if (!period || typeof period !== 'string') {
-    return date;
-  }
-  
-  const value = parseInt(period);
-  const unit = period.slice(-1);
-  
-  switch(unit) {
-    case 'm':
-      return add(date, { months: value });
-    case 'y':
-      return add(date, { years: value });
-    default:
-      return date;
-  }
-};
-
-export default function MemoryForm({ 
-  initialData, 
-  isEditing = false, 
-  onSubmit, 
-  onCancel,
-  template,
-  categories
-}: MemoryFormProps) {
-  const initialFormData: MemoryFormData = {
-    id: '',
+export default function MemoryForm({ initialData, isEditing = false, onSubmit, onCancel }: MemoryFormProps) {
+  const [formData, setFormData] = useState<MemoryFormData>(initialData || {
     title: '',
     content: '',
-    category: 'movie',
-    description: '',
+    category: '',
     date: new Date().toISOString().split('T')[0],
     location: '',
     mood: '',
-    weather: '',
-    people: [],
     stickers: [],
-    rating: 0,
     tags: [],
     attachments: [],
-    sections: [],
-    capsule_name: '',
-    capsule_description: '',
-    metadata: {
-      lockPeriod: '1y',
-      isAnimated: false
-    }
-  };
-
-  const [formData, setFormData] = useState<MemoryFormData>(() => {
-    if (initialData) {
-      return {
-        ...initialFormData,
-        ...initialData,
-        metadata: {
-          ...(initialData.metadata || {}),
-          lockPeriod: initialData.metadata?.lockPeriod || '1y',
-          isAnimated: initialData.metadata?.isAnimated || false
-        }
-      };
-    }
-    return initialFormData;
   });
 
-  const [newTag, setNewTag] = useState('');
-  const [attachmentUrl, setAttachmentUrl] = useState('');
-  const [attachmentType, setAttachmentType] = useState<'image' | 'video' | 'audio'>('image');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [categories, setCategories] = useState<CategoryMetadata[]>([]);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
-  const [newListItems, setNewListItems] = useState<Record<string, string>>({});
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [imageUrl, setImageUrl] = useState('');
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
-  const [voiceNote, setVoiceNote] = useState<Blob | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (isSubmitting) return;
+  useEffect(() => {
+    fetchCategories();
+  }, []);
 
+  const fetchCategories = async () => {
     try {
-      setIsSubmitting(true);
-      await onSubmit(formData);
-      onCancel();
-    } catch (error) {
-      console.error('Error submitting form:', error);
-      toast.error('Failed to save memory');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleAddTag();
-    }
-  };
-
-  const handleAddTag = () => {
-    if (newTag.trim() && !formData.tags.includes(newTag.trim())) {
-      setFormData({
-        ...formData,
-        tags: [...formData.tags, newTag.trim()]
-      });
-      setNewTag('');
-    }
-  };
-
-  const handleRemoveTag = (tagToRemove: string) => {
-    setFormData({
-      ...formData,
-      tags: formData.tags.filter(tag => tag !== tagToRemove)
-    });
-  };
-
-  const handleAddAttachment = () => {
-    if (attachmentUrl.trim()) {
-      setFormData({
-        ...formData,
-        attachments: [
-          ...formData.attachments,
-          {
-            url: attachmentUrl.trim(),
-            type: attachmentType,
-            name: attachmentUrl.split('/').pop() || 'attachment'
-          }
-        ]
-      });
-      setAttachmentUrl('');
-    }
-  };
-
-  const handleRemoveAttachment = async (attachment: { url: string, path?: string }) => {
-    if (!attachment.path) {
-      // Handle old attachments without path
-      setFormData(prev => ({
-        ...prev,
-        attachments: prev.attachments.filter(a => a.url !== attachment.url)
-      }));
-      return;
-    }
-
-    try {
-      // Delete from Supabase Storage
-      const { error } = await supabase.storage
-        .from('memories')
-        .remove([attachment.path]);
+      const { data, error } = await supabase
+        .from('category_metadata')
+        .select('*')
+        .order('category');
 
       if (error) throw error;
-
-      // Remove from form data
-      setFormData(prev => ({
-        ...prev,
-        attachments: prev.attachments.filter(a => a.url !== attachment.url)
-      }));
-
-      toast.success('Attachment removed successfully');
+      setCategories(data || []);
     } catch (error) {
-      console.error('Delete error:', error);
-      toast.error('Failed to remove attachment');
+      console.error('Error fetching categories:', error);
+      toast.error('Error loading categories');
     }
   };
 
-  const handleAddSticker = (sticker: string) => {
-    setFormData({
-      ...formData,
-      stickers: [...formData.stickers, sticker]
-    });
-    setShowStickerPicker(false);
-  };
-
-  const handleRemoveSticker = (stickerToRemove: string) => {
-    setFormData({
-      ...formData,
-      stickers: formData.stickers.filter(sticker => sticker !== stickerToRemove)
-    });
-  };
-
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
-      toast.error(`File size must be less than ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
-      return;
-    }
-
-    // Validate file type
-    const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type);
-    const isAudio = ACCEPTED_AUDIO_TYPES.includes(file.type);
-    if (!isImage && !isAudio) {
-      toast.error('Invalid file type. Please upload an image or audio file.');
-      return;
-    }
-
+  const startRecording = async () => {
     try {
-      setIsUploading(true);
-      setUploadProgress(0);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
 
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${uuidv4()}.${fileExt}`;
-      const bucket = isImage ? 'images' : 'audio';
+      mediaRecorder.ondataavailable = (event) => {
+        audioChunksRef.current.push(event.data);
+      };
 
-      // Get the current session
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('No session found');
-
-      // Create upload
-      await new Promise<void>((resolve, reject) => {
-        const upload = new tus.Upload(file, {
-          endpoint: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/upload/resumable`,
-          retryDelays: [0, 3000, 5000, 10000, 20000],
-          headers: {
-            authorization: `Bearer ${session.access_token}`,
-          },
-          uploadDataDuringCreation: true,
-          removeFingerprintOnSuccess: true,
-          metadata: {
-            bucketName: bucket,
-            objectName: fileName,
-            contentType: file.type,
-            cacheControl: '3600',
-          },
-          chunkSize: 6 * 1024 * 1024, // 6MB chunks
-          onError: (error) => {
-            console.error('Upload error:', error);
-            reject(error);
-          },
-          onProgress: (bytesUploaded: number, bytesTotal: number) => {
-            const percentage = ((bytesUploaded / bytesTotal) * 100).toFixed(2);
-            setUploadProgress(parseFloat(percentage));
-          },
-          onSuccess: () => {
-            resolve();
-          },
-        });
-
-        // Start the upload
-        upload.findPreviousUploads().then((previousUploads) => {
-          if (previousUploads.length) {
-            upload.resumeFromPreviousUpload(previousUploads[0]);
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        setFormData(prev => ({
+          ...prev,
+          voiceNote: {
+            url: audioUrl,
+            duration: recordingDuration,
+            blob: audioBlob
           }
-          upload.start();
-        });
-      });
+        }));
+        setIsRecording(false);
+        setRecordingDuration(0);
+        stream.getTracks().forEach(track => track.stop());
+      };
 
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from(bucket)
-        .getPublicUrl(fileName);
-
-      // Add to form data
-      setFormData(prev => ({
-        ...prev,
-        attachments: [
-          ...prev.attachments,
-          {
-            url: publicUrl,
-            type: isImage ? 'image' : 'audio',
-            name: file.name
-          }
-        ]
-      }));
-
-      toast.success('File uploaded successfully!');
+      mediaRecorder.start();
+      setIsRecording(true);
+      timerRef.current = setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
     } catch (error) {
-      console.error('Upload error:', error);
-      toast.error('Failed to upload file. Please try again.');
-    } finally {
-      setIsUploading(false);
-      setUploadProgress(0);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      console.error('Error accessing microphone:', error);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
       }
     }
   };
 
-  const handleUpdateSection = (sectionName: string, value: string | string[]) => {
+  const togglePlayback = () => {
+    if (!formData.voiceNote) return;
+
+    if (isPlaying && audioRef.current) {
+      audioRef.current.pause();
+    } else if (audioRef.current) {
+      audioRef.current.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await onSubmit(formData);
+  };
+
+  const handleTagAdd = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+      e.preventDefault();
+      const newTag = e.currentTarget.value.trim();
+      if (!formData.tags.some(tag => tag.toLowerCase() === newTag.toLowerCase())) {
+        setFormData({ ...formData, tags: [...formData.tags, newTag] });
+      }
+      e.currentTarget.value = '';
+    }
+  };
+
+  const handleTagRemove = (tagToRemove: string) => {
+    setFormData({
+      ...formData,
+      tags: formData.tags.filter(tag => tag !== tagToRemove),
+    });
+  };
+
+  const handleImageUpload = async (file: File) => {
+    try {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        toast.error('Please upload an image file');
+        return;
+      }
+
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('Image size should be less than 5MB');
+        return;
+      }
+
+      // Create preview URL
+      const previewUrl = URL.createObjectURL(file);
+      setPreviewUrl(previewUrl);
+
+      // Get user ID from Supabase auth
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+
+      // Upload to Supabase Storage
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+      const filePath = `${user.id}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('memory-images')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        throw uploadError;
+      }
+
+      // Get signed URL that expires in 1 hour
+      const { data: signedUrlData } = await supabase.storage
+        .from('memory-images')
+        .createSignedUrl(filePath, 3600);
+
+      if (!signedUrlData?.signedUrl) {
+        throw new Error('Failed to generate signed URL');
+      }
+
+      // Add to attachments
+      const newAttachment = {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        blob: file,
+        url: signedUrlData.signedUrl,
+        path: filePath
+      };
+
+      setFormData(prev => ({
+        ...prev,
+        attachments: [...prev.attachments, newAttachment]
+      }));
+
+      toast.success('Image uploaded successfully');
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      toast.error('Failed to upload image');
+      // Clean up preview URL if upload fails
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        setPreviewUrl(null);
+      }
+    }
+  };
+
+  const handleUrlSubmit = () => {
+    if (!imageUrl) return;
+
+    // Validate URL
+    try {
+      new URL(imageUrl);
+    } catch {
+      toast.error('Please enter a valid URL');
+      return;
+    }
+
+    // Add to attachments
     setFormData(prev => ({
       ...prev,
-      sections: prev.sections.map(section =>
-        section.name === sectionName
-          ? { ...section, content: value }
-          : section
-      )
+      attachments: [...prev.attachments, {
+        name: 'External Image',
+        type: 'image/jpeg',
+        size: 0,
+        blob: new Blob(),
+        url: imageUrl
+      }]
+    }));
+
+    setImageUrl('');
+    setShowUrlInput(false);
+    toast.success('Image URL added successfully');
+  };
+
+  const handleAttachmentRemove = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      attachments: prev.attachments.filter((_, i) => i !== index)
     }));
   };
 
-  const handleAddListItem = (sectionName: string, item: string) => {
-    if (!item.trim()) return;
-
-    setFormData(prev => ({
-      ...prev,
-      sections: prev.sections.map(section =>
-        section.name === sectionName && section.type === 'list'
-          ? {
-              ...section,
-              content: [...(section.content as string[]), item.trim()]
-            }
-          : section
-      )
-    }));
+  const handleStickerSelect = (sticker: string) => {
+    if (!formData.stickers.includes(sticker)) {
+      setFormData({
+        ...formData,
+        stickers: [...formData.stickers, sticker],
+      });
+    }
+    setShowStickerPicker(false);
   };
 
-  const handleRemoveListItem = (sectionName: string, index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      sections: prev.sections.map(section =>
-        section.name === sectionName && section.type === 'list'
-          ? {
-              ...section,
-              content: (section.content as string[]).filter((_, i) => i !== index)
-            }
-          : section
-      )
-    }));
-  };
-
-  const handleVoiceRecordingSave = (audioBlob: Blob) => {
-    setVoiceNote(audioBlob);
-    setShowVoiceRecorder(false);
-    // Add the voice note to the attachments
-    const voiceNoteURL = URL.createObjectURL(audioBlob);
-    const newAttachment: Attachment = {
-      type: 'audio',
-      url: voiceNoteURL,
-      name: `Voice Note - ${new Date().toLocaleString()}`,
-      blob: audioBlob
+  // Clean up preview URLs when component unmounts
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
     };
-    setFormData(prev => ({
-      ...prev,
-      attachments: [...prev.attachments, newAttachment]
-    }));
+  }, [previewUrl]);
+
+  const getIconComponent = (iconName: string) => {
+    // Map icon names to Lucide icons
+    const iconMap: { [key: string]: string } = {
+      'Film': '🎬',
+      'Tv': '📺',
+      'Music': '🎵',
+      'Headphones': '🎧',
+      'BookOpen': '📚',
+      'Cake': '🎂',
+      'Heart': '❤️',
+      'Users': '��',
+      'Star': '⭐',
+      'Gamepad2': '🎮',
+      'Trophy': '🏆',
+      'Palette': '🎨',
+      'Camera': '📸',
+      'Plane': '✈️',
+      'Mountain': '🏔️',
+      'Building2': '🏛️',
+      'Activity': '🏃',
+      'Moon': '🌙',
+      'Stethoscope': '🏥',
+      'Apple': '🍎',
+      'Award': '🏅',
+      'GraduationCap': '🎓',
+      'Coffee': '☕',
+      'Party': '🎉',
+      'Utensils': '🍽️',
+      'ChefHat': '👨‍🍳',
+      'UtensilsCrossed': '🍴',
+      'Gift': '🎁',
+      'PartyPopper': '🎊',
+      'Ring': '💍',
+      'Church': '⛪',
+      'Sparkles': '✨',
+      'Zap': '⚡',
+      'Pencil': '✏️'
+    };
+    return iconMap[iconName] || '📝';
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 bg-white rounded-2xl p-6 border border-gray-200 shadow-lg">
-      {/* Time Capsule Details Section */}
-      <div className="space-y-6 mb-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <label className="block text-sm font-semibold text-gray-700">
-              Time Capsule Name
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                value={formData.capsule_name}
-                onChange={(e) => setFormData({ ...formData, capsule_name: e.target.value })}
-                className="block w-full px-4 py-3 bg-white border border-gray-200 rounded-xl shadow-sm 
-                         focus:ring-2 focus:ring-indigo-500 focus:border-transparent
-                         hover:bg-gray-50 transition-all duration-300"
-                placeholder="Give your capsule a meaningful name"
-                required
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="block text-sm font-semibold text-gray-700">
-              Lock Period
-            </label>
-            <div className="relative">
-              <select
-                value={formData.metadata.lockPeriod}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  metadata: { ...formData.metadata, lockPeriod: e.target.value }
-                })}
-                className="block w-full px-4 py-3 bg-white border border-gray-200 rounded-xl shadow-sm 
-                         focus:ring-2 focus:ring-indigo-500 focus:border-transparent
-                         hover:bg-gray-50 transition-all duration-300 appearance-none"
-              >
-                <option value="1m">1 Month</option>
-                <option value="3m">3 Months</option>
-                <option value="6m">6 Months</option>
-                <option value="1y">1 Year</option>
-                <option value="2y">2 Years</option>
-                <option value="5y">5 Years</option>
-              </select>
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
-                <ChevronDown className="h-5 w-5 text-gray-400" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <label className="block text-sm font-semibold text-gray-700">
-            Description
-          </label>
-          <div className="relative">
-            <textarea
-              value={formData.capsule_description}
-              onChange={(e) => setFormData({ ...formData, capsule_description: e.target.value })}
-              className="block w-full px-4 py-3 bg-white border border-gray-200 rounded-xl shadow-sm
-                       focus:ring-2 focus:ring-indigo-500 focus:border-transparent
-                       hover:bg-gray-50 transition-all duration-300"
-              placeholder="What makes this time capsule special?"
-              rows={3}
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 p-4 bg-amber-50 rounded-xl border border-amber-100">
-          <div className="p-2 bg-amber-100 rounded-lg">
-            <Lock className="h-5 w-5 text-amber-600" />
-          </div>
-          <div>
-            <h3 className="font-medium text-amber-900">Time Capsule Lock</h3>
-            <p className="text-sm text-amber-700">
-              This capsule will be locked until {format(addTime(new Date(), formData.metadata.lockPeriod), 'PPP')}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Memory Content Section */}
+    <form onSubmit={handleSubmit} className="space-y-6">
       <div className="space-y-6">
-        <div className="flex items-center gap-3 mb-6">
-          <Gift className="h-8 w-8 text-indigo-600" />
-          <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 text-transparent bg-clip-text">
-            Memory Details
-          </h2>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">Title</label>
-            <input
-              type="text"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              className="input bg-white w-full"
-              placeholder="Give your memory a title"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">Category</label>
-            <select
-              value={formData.category}
-              onChange={(e) => setFormData({ ...formData, category: e.target.value as any })}
-              className="input bg-white w-full"
-            >
-              {categories.map(cat => (
-                <option key={cat.category} value={cat.category}>
-                  {cat.description}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Content</label>
-          <textarea
-            value={formData.content}
-            onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-            rows={4}
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Memory Title
+          </label>
+          <input
+            type="text"
+            value={formData.title}
+            onChange={(e) => setFormData({ ...formData, title: e.target.value })}
             className="input bg-white w-full"
-            placeholder="Write your memory here..."
+            placeholder="Give your memory a title"
             required
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">Date</label>
-            <input
-              type="date"
-              value={formData.date}
-              onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-              className="input bg-white w-full"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">Location</label>
-            <input
-              type="text"
-              value={formData.location}
-              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-              className="input bg-white w-full"
-              placeholder="Where did this memory take place?"
-            />
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Category
+          </label>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            {categories.map((category) => (
+              <button
+                key={category.category}
+                type="button"
+                onClick={() => setFormData({ ...formData, category: category.category })}
+                className={`flex items-center gap-2 p-3 rounded-lg border transition-all duration-200 ${
+                  formData.category === category.category
+                    ? 'border-indigo-500 bg-indigo-50'
+                    : 'border-gray-200 hover:border-indigo-200 hover:bg-indigo-50/50'
+                }`}
+              >
+                <div
+                  className="w-8 h-8 rounded-full flex items-center justify-center"
+                  style={{ backgroundColor: `${category.color}20` }}
+                >
+                  <span style={{ color: category.color }} className="text-lg">
+                    {getIconComponent(category.icon_name)}
+                  </span>
+                </div>
+                <div className="text-left">
+                  <div className="text-sm font-medium text-gray-900">
+                    {category.description}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {category.category.split('_').map(word => 
+                      word.charAt(0).toUpperCase() + word.slice(1)
+                    ).join(' ')}
+                  </div>
+                </div>
+              </button>
+            ))}
           </div>
         </div>
 
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Mood & Stickers</label>
-          <div className="space-y-4">
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Memory Content
+          </label>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+            <RichTextEditor
+              content={formData.content}
+              onChange={(content) => setFormData({ ...formData, content })}
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Date
+            </label>
+            <div className="relative">
+              <input
+                type="date"
+                value={formData.date}
+                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                className="input bg-white w-full pl-10"
+                required
+              />
+              <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Location
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={formData.location}
+                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                className="input bg-white w-full pl-10"
+                placeholder="Where did this happen?"
+              />
+              <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Mood & Stickers
+          </label>
+          <div className="flex items-start gap-4">
             <input
               type="text"
               value={formData.mood}
               onChange={(e) => setFormData({ ...formData, mood: e.target.value })}
-              className="input bg-white w-full"
-              placeholder="How are you feeling?"
+              className="input bg-white flex-1"
+              placeholder="How were you feeling?"
             />
-            <div className="flex items-center gap-2">
+            <div className="relative">
               <button
                 type="button"
                 onClick={() => setShowStickerPicker(!showStickerPicker)}
-                className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-600 
-                         rounded-xl border border-indigo-200 hover:bg-indigo-50 transition-colors"
+                className="p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
               >
-                <Sticker className="h-4 w-4" />
-                <span>Add Stickers</span>
+                <Smile className="h-5 w-5 text-gray-600" />
               </button>
-            </div>
-            {showStickerPicker && (
-              <div className="relative">
-                <div className="absolute z-10 mt-2 bg-white rounded-xl shadow-xl border border-gray-200">
+              {showStickerPicker && (
+                <div className="absolute z-50 right-0 mt-2">
                   <StickerPicker
-                    onSelect={handleAddSticker}
+                    onSelect={handleStickerSelect}
                     selectedStickers={formData.stickers}
                   />
                 </div>
-              </div>
-            )}
-            {formData.stickers.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {formData.stickers.map((sticker, index) => (
-                  <span
-                    key={`${sticker}-${index}`}
-                    className="inline-flex items-center px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-600 
-                           hover:bg-indigo-100 cursor-pointer transition-colors"
-                    onClick={() => handleRemoveSticker(sticker)}
-                    title="Click to remove"
-                  >
-                    {sticker}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Tags</label>
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={newTag}
-                onChange={(e) => setNewTag(e.target.value)}
-                onKeyDown={handleTagKeyDown}
-                placeholder="Add a tag"
-                className="input bg-white flex-1"
-              />
-              <button
-                type="button"
-                onClick={handleAddTag}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl 
-                         hover:bg-indigo-700 transition-colors"
-              >
-                <Tag className="h-4 w-4" />
-                Add
-              </button>
+              )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {formData.tags.map((tag) => (
+          </div>
+          {formData.stickers.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {formData.stickers.map((sticker, index) => (
                 <span
-                  key={tag}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-medium 
-                           bg-indigo-50 text-indigo-600"
+                  key={index}
+                  className="text-2xl cursor-pointer hover:scale-110 transition-transform"
+                  onClick={() => setFormData({
+                    ...formData,
+                    stickers: formData.stickers.filter((_, i) => i !== index)
+                  })}
                 >
-                  {tag}
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveTag(tag)}
-                    className="hover:text-indigo-800 focus:outline-none"
-                  >
-                    ×
-                  </button>
+                  {sticker}
                 </span>
               ))}
             </div>
-          </div>
+          )}
         </div>
 
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Attachments</label>
-          <div className="space-y-4">
-            <div className="flex flex-col space-y-2">
-              <div className="flex items-center gap-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  onChange={handleFileSelect}
-                  accept={ACCEPTED_IMAGE_TYPES.join(',')}
-                  className="hidden"
-                />
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Tags
+          </label>
+          <div className="flex flex-wrap gap-2 mb-2">
+            {formData.tags.map((tag) => (
+              <span
+                key={tag}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-sm font-medium
+                         bg-indigo-50 text-indigo-600 border border-indigo-100"
+              >
+                <Tag className="h-3 w-3" />
+                {tag}
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-600 
-                           rounded-xl border border-indigo-200 hover:bg-indigo-50 transition-colors flex-1"
-                  disabled={isUploading}
+                  onClick={() => handleTagRemove(tag)}
+                  className="text-indigo-400 hover:text-indigo-600"
                 >
-                  <Image className="h-5 w-5" />
-                  Upload Photos
+                  <X className="h-3 w-3" />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setShowVoiceRecorder(!showVoiceRecorder)}
-                  className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-600 
-                           rounded-xl border border-indigo-200 hover:bg-indigo-50 transition-colors flex-1"
-                >
-                  <Mic className="h-5 w-5" />
-                  Add Voice Note
-                </button>
-              </div>
-              <p className="text-sm text-gray-500 text-center">
-                Photos (JPG, PNG, GIF, WebP) or voice notes (WAV, MP3, WebM) up to 5MB
-              </p>
-            </div>
-
-            {isUploading && (
-              <div className="relative w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                <motion.div
-                  className="absolute left-0 top-0 h-full bg-gradient-to-r from-indigo-600 to-purple-600"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${uploadProgress}%` }}
-                  transition={{ duration: 0.3 }}
-                />
-              </div>
-            )}
-
-            {showVoiceRecorder && (
-              <VoiceRecorder
-                onSave={handleVoiceRecordingSave}
-                onCancel={() => setShowVoiceRecorder(false)}
-              />
-            )}
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              <AnimatePresence>
-                {formData.attachments.map((attachment, index) => (
-                  <motion.div
-                    key={`${attachment.url}-${index}`}
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.8 }}
-                    className="relative group rounded-xl overflow-hidden bg-gray-50 aspect-square"
-                  >
-                    {attachment.type === 'image' ? (
-                      <img
-                        src={attachment.url}
-                        alt={attachment.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : attachment.type === 'audio' ? (
-                      <div className="w-full h-full flex items-center justify-center p-4">
-                        <audio
-                          src={attachment.url}
-                          controls
-                          className="w-full"
-                        />
-                      </div>
-                    ) : null}
-                    <motion.button
-                      initial={{ opacity: 0 }}
-                      whileHover={{ opacity: 1 }}
-                      onClick={() => handleRemoveAttachment(attachment)}
-                      className="absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-full shadow-lg"
-                    >
-                      <X className="h-4 w-4" />
-                    </motion.button>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
+              </span>
+            ))}
           </div>
+          <input
+            type="text"
+            onKeyDown={handleTagAdd}
+            className="input bg-white w-full"
+            placeholder="Add tags (press Enter)"
+          />
         </div>
 
-        {formData.sections.map((section, index) => (
-          <div key={`${section.name}-${index}`} className="space-y-2">
-            <label className="block text-sm font-semibold text-gray-700 mb-2">{section.name}</label>
-            {section.type === 'text' ? (
-              <input
-                type="text"
-                value={section.content as string}
-                onChange={(e) => handleUpdateSection(section.name, e.target.value)}
-                placeholder={section.placeholder}
-                className="input bg-white w-full"
-              />
-            ) : section.type === 'list' ? (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={newListItems[section.name] || ''}
-                    onChange={(e) => setNewListItems(prev => ({
-                      ...prev,
-                      [section.name]: e.target.value
-                    }))}
-                    placeholder={section.placeholder}
-                    className="input bg-white flex-1"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddListItem(section.name, newListItems[section.name] || '');
-                        setNewListItems(prev => ({ ...prev, [section.name]: '' }));
-                      }
-                    }}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Attachments
+          </label>
+          <div className="space-y-4">
+            {/* Image Previews */}
+            <div className="grid grid-cols-2 gap-4">
+              {/* Current Upload Preview */}
+              {previewUrl && (
+                <div className="relative rounded-lg overflow-hidden border border-gray-200">
+                  <img
+                    src={previewUrl}
+                    alt="Upload Preview"
+                    className="w-full h-48 object-cover"
                   />
                   <button
                     type="button"
                     onClick={() => {
-                      handleAddListItem(section.name, newListItems[section.name] || '');
-                      setNewListItems(prev => ({ ...prev, [section.name]: '' }));
+                      setPreviewUrl(null);
+                      if (fileInputRef.current) {
+                        fileInputRef.current.value = '';
+                      }
                     }}
-                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl 
-                             hover:bg-indigo-700 transition-colors"
+                    className="absolute top-2 right-2 p-1 bg-white/80 backdrop-blur-sm rounded-full hover:bg-white transition-colors"
                   >
-                    Add
+                    <X className="h-4 w-4 text-gray-600" />
                   </button>
                 </div>
-                <div className="space-y-2">
-                  {(section.content as string[]).map((item, itemIndex) => (
-                    <div
-                      key={`${section.name}-item-${itemIndex}`}
-                      className="flex items-center justify-between p-3 bg-white rounded-xl border border-gray-200"
+              )}
+
+              {/* Existing Attachments */}
+              {formData.attachments.map((attachment, index) => (
+                attachment.type.startsWith('image/') && (
+                  <div key={index} className="relative rounded-lg overflow-hidden border border-gray-200">
+                    <img
+                      src={attachment.url}
+                      alt={attachment.name}
+                      className="w-full h-48 object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleAttachmentRemove(index)}
+                      className="absolute top-2 right-2 p-1 bg-white/80 backdrop-blur-sm rounded-full hover:bg-white transition-colors"
                     >
-                      <span className="text-gray-700">{item}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveListItem(section.name, itemIndex)}
-                        className="text-red-500 hover:text-red-700 transition-colors"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                      <X className="h-4 w-4 text-gray-600" />
+                    </button>
+                  </div>
+                )
+              ))}
+            </div>
+
+            {/* URL Input */}
+            {showUrlInput && (
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  placeholder="Enter image URL"
+                  className="input bg-white flex-1"
+                />
+                <button
+                  type="button"
+                  onClick={handleUrlSubmit}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                >
+                  Add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowUrlInput(false)}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
               </div>
-            ) : null}
+            )}
+
+            {/* Upload Controls */}
+            <div className="flex gap-2">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleImageUpload(file);
+                }}
+                accept="image/*"
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <Upload className="h-4 w-4" />
+                Upload Image
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowUrlInput(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <LinkIcon className="h-4 w-4" />
+                Add URL
+              </button>
+            </div>
+
+            {/* Attachments List */}
+            {formData.attachments.length > 0 && (
+              <div className="space-y-2">
+                {formData.attachments.map((attachment, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Image className="h-5 w-5 text-gray-400" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{attachment.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {attachment.size ? `${(attachment.size / 1024 / 1024).toFixed(2)} MB` : 'External URL'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAttachmentRemove(index)}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        ))}
+        </div>
+
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Voice Note
+          </label>
+          <div className="space-y-4">
+            {formData.voiceNote ? (
+              <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <button
+                  type="button"
+                  onClick={togglePlayback}
+                  className="p-2 bg-indigo-50 rounded-full text-indigo-600 hover:bg-indigo-100 transition-colors"
+                >
+                  {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+                </button>
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-gray-900">Voice Note</div>
+                  <div className="text-sm text-gray-500">{formatDuration(formData.voiceNote.duration)}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFormData(prev => ({ ...prev, voiceNote: undefined }))}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-4">
+                <button
+                  type="button"
+                  onClick={isRecording ? stopRecording : startRecording}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                    isRecording
+                      ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                      : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
+                  }`}
+                >
+                  {isRecording ? (
+                    <>
+                      <Square className="h-5 w-5" />
+                      Stop Recording
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="h-5 w-5" />
+                      Record Voice Note
+                    </>
+                  )}
+                </button>
+                {isRecording && (
+                  <div className="text-sm font-medium text-gray-900">
+                    Recording: {formatDuration(recordingDuration)}
+                  </div>
+                )}
+              </div>
+            )}
+            <audio
+              ref={audioRef}
+              src={formData.voiceNote?.url}
+              onEnded={() => setIsPlaying(false)}
+              className="hidden"
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="flex items-center justify-between pt-6 border-t border-gray-200">
+      <div className="flex justify-end gap-4">
         <button
           type="button"
           onClick={onCancel}
@@ -954,18 +713,14 @@ export default function MemoryForm({
           <X className="h-4 w-4" />
           Cancel
         </button>
-        <div className="flex items-center gap-4">
-          <button
-            type="submit"
-            disabled={isSubmitting || isUploading}
-            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600
-                     text-white rounded-xl shadow-lg hover:shadow-xl disabled:opacity-50
-                     transition-all duration-300 hover:translate-y-[-1px]"
-          >
-            <Gift className="h-4 w-4" />
-            {isSubmitting ? 'Creating...' : 'Create Time Capsule'}
-          </button>
-        </div>
+        <button
+          type="submit"
+          className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600
+                   text-white rounded-xl shadow-lg hover:shadow-xl disabled:opacity-50
+                   transition-all duration-300 hover:translate-y-[-1px]"
+        >
+          {isEditing ? 'Update Memory' : 'Create Memory'}
+        </button>
       </div>
     </form>
   );
