@@ -138,7 +138,7 @@ export default function TimeCapsuleForm({ memories, onSubmit, onCancel }: TimeCa
                 onClick={() => handleMemorySelect(memory)}
               >
                 <h3 className="font-medium text-gray-900 mb-2">{memory.title}</h3>
-                <div className="text-sm text-gray-500 line-clamp-2">
+                <div className="text-gray-700 mb-3 max-h-24 overflow-y-auto">
                   <MemoryContent memory={memory} />
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
