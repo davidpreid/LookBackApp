@@ -164,14 +164,53 @@ export default function TimeCapsule() {
 
   const fetchTimeCapsules = async () => {
     try {
+      if (!user) return;
+
       const { data, error } = await supabase
-        .from('time_capsules')
-        .select('*')
-        .eq('user_id', user?.id)
+        .from('memories')
+        .select(`
+          id,
+          title,
+          content,
+          created_at,
+          unlock_date,
+          capsule_name,
+          capsule_description,
+          metadata,
+          user_id
+        `)
+        .eq('user_id', user.id)
+        .not('unlock_date', 'is', null)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setTimeCapsules(data || []);
+
+      // Transform the data into TimeCapsule format
+      const capsules = (data || []).reduce((acc: TimeCapsule[], memory) => {
+        // Group memories by capsule name
+        const capsuleName = memory.capsule_name;
+        if (!capsuleName) return acc;
+
+        const existingCapsule = acc.find(c => c.name === capsuleName);
+        if (existingCapsule) {
+          existingCapsule.memory_count = (existingCapsule.memory_count || 0) + 1;
+          return acc;
+        }
+
+        acc.push({
+          id: memory.id,
+          name: capsuleName,
+          description: memory.capsule_description || '',
+          user_id: memory.user_id,
+          created_at: memory.created_at,
+          lock_until: memory.unlock_date,
+          memory_count: 1
+        });
+
+        return acc;
+      }, []);
+
+      setTimeCapsules(capsules);
     } catch (error) {
       console.error('Error fetching time capsules:', error);
       toast.error('Failed to fetch time capsules');
@@ -434,26 +473,27 @@ export default function TimeCapsule() {
     selectedMemories: Memory[];
   }) => {
     try {
-      // Create the time capsule
-      const { data: timeCapsule, error: timeCapsuleError } = await supabase
-        .from('time_capsules')
-        .insert([
-          {
-            name: data.name,
-            description: data.description,
-            user_id: user?.id,
-            lock_until: new Date(Date.now() + getLockPeriodInMs(data.lockPeriod)),
-          },
-        ])
-        .select()
-        .single();
+      if (!user?.id) {
+        toast.error('You must be logged in to create a time capsule');
+        return;
+      }
 
-      if (timeCapsuleError) throw timeCapsuleError;
+      const lockPeriod = LOCK_PERIODS.find(p => p.value === data.lockPeriod);
+      if (!lockPeriod) {
+        toast.error('Invalid lock period');
+        return;
+      }
 
-      // Update selected memories to be locked
+      const unlockDate = lockPeriod.fn(new Date()).toISOString();
+
+      // Update selected memories with capsule information
       const { error: memoriesError } = await supabase
         .from('memories')
-        .update({ is_locked: true, time_capsule_id: timeCapsule.id })
+        .update({
+          capsule_name: data.name,
+          capsule_description: data.description,
+          unlock_date: unlockDate
+        })
         .in(
           'id',
           data.selectedMemories.map(m => m.id)
@@ -566,7 +606,7 @@ export default function TimeCapsule() {
         {/* Form Section */}
         {isCreating ? (
           <TimeCapsuleForm
-            memories={memories}
+            memories={availableMemories}
             onSubmit={handleCreateTimeCapsule}
             onCancel={() => setIsCreating(false)}
           />

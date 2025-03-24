@@ -3,6 +3,7 @@ import { Lock, Gift, X, ChevronDown } from 'lucide-react';
 import { format, add } from 'date-fns';
 import { Memory } from '../types';
 import { toast } from 'react-hot-toast';
+import MemoryContent from './MemoryContent';
 
 interface TimeCapsuleFormProps {
   memories: Memory[];
@@ -137,7 +138,9 @@ export default function TimeCapsuleForm({ memories, onSubmit, onCancel }: TimeCa
                 onClick={() => handleMemorySelect(memory)}
               >
                 <h3 className="font-medium text-gray-900 mb-2">{memory.title}</h3>
-                <p className="text-sm text-gray-500 line-clamp-2">{memory.content}</p>
+                <div className="text-sm text-gray-500 line-clamp-2">
+                  <MemoryContent memory={memory} />
+                </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {memory.metadata?.tags?.slice(0, 2).map((tag) => (
                     <span
