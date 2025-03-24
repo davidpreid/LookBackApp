@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { HelmetProvider } from 'react-helmet-async';
 import { useLocation } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import Reviews from './pages/Reviews';
@@ -29,7 +29,7 @@ import Profile from './pages/Profile';
 import Analytics from './pages/Analytics';
 import ProtectedRoute from './components/ProtectedRoute';
 import { motion } from 'framer-motion';
-import { Gift, Lock, Calendar, Upload, Download, Clock, Menu, X, BookOpen, Shield, PenTool, Users, BarChart, HardDrive, Sparkles, Database } from 'lucide-react';
+import { Gift, Lock, Calendar, Upload, Download, Clock, Menu, X, BookOpen, Shield, PenTool, Users, BarChart, HardDrive, Sparkles, Database, ArrowRight } from 'lucide-react';
 import './index.css';
 import './styles/grid-pattern.css';
 
@@ -44,6 +44,8 @@ function ScrollToTop() {
 }
 
 function LandingHero() {
+  const { user } = useAuth();
+  
   return (
     <>
       <div className="relative min-h-screen bg-gradient-to-b from-white to-indigo-50">
@@ -104,27 +106,43 @@ function LandingHero() {
               </p>
 
               <div className="flex flex-wrap gap-4">
-                <Link to="/register">
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="px-8 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl 
-                             shadow-lg hover:shadow-xl font-medium text-lg flex items-center gap-2"
-                  >
-                    Get Started
-                  </motion.button>
-                </Link>
-                
-                <Link to="/login">
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="px-8 py-4 bg-white text-indigo-600 rounded-xl shadow-lg hover:shadow-xl 
-                             font-medium text-lg flex items-center gap-2 border border-indigo-100"
-                  >
-                    Sign In
-                  </motion.button>
-                </Link>
+                {user ? (
+                  <Link to="/dashboard">
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      className="px-8 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl 
+                               shadow-lg hover:shadow-xl font-medium text-lg flex items-center gap-2"
+                    >
+                      Go to Dashboard
+                      <ArrowRight className="w-5 h-5" />
+                    </motion.button>
+                  </Link>
+                ) : (
+                  <>
+                    <Link to="/register">
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        className="px-8 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl 
+                                 shadow-lg hover:shadow-xl font-medium text-lg flex items-center gap-2"
+                      >
+                        Get Started
+                      </motion.button>
+                    </Link>
+                    
+                    <Link to="/login">
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        className="px-8 py-4 bg-white text-indigo-600 rounded-xl shadow-lg hover:shadow-xl 
+                                 font-medium text-lg flex items-center gap-2 border border-indigo-100"
+                      >
+                        Sign In
+                      </motion.button>
+                    </Link>
+                  </>
+                )}
               </div>
 
               {/* Feature List */}
@@ -177,8 +195,8 @@ function LandingHero() {
                   <div className="p-6">
                     <div className="flex items-center justify-between mb-6">
                       <div className="space-y-2">
-                        <h3 className="text-xl font-semibold text-gray-900">Summer Memories 2023</h3>
-                        <p className="text-sm text-gray-500">Unlocks on June 21, 2024</p>
+                        <h3 className="text-xl font-semibold text-gray-900">Summer Memories 2024</h3>
+                        <p className="text-sm text-gray-500">Unlocks on June 21, 2029</p>
                       </div>
                       <div className="p-3 bg-indigo-50 rounded-xl">
                         <Lock className="w-6 h-6 text-indigo-600" />

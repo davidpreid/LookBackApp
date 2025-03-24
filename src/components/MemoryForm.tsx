@@ -198,6 +198,10 @@ export const MEMORY_TEMPLATES: MemoryTemplate[] = [
 ];
 
 const addTime = (date: Date, period: string): Date => {
+  if (!period || typeof period !== 'string') {
+    return date;
+  }
+  
   const value = parseInt(period);
   const unit = period.slice(-1);
   
@@ -243,9 +247,20 @@ export default function MemoryForm({
     }
   };
 
-  const [formData, setFormData] = useState<MemoryFormData>(
-    initialData || initialFormData
-  );
+  const [formData, setFormData] = useState<MemoryFormData>(() => {
+    if (initialData) {
+      return {
+        ...initialFormData,
+        ...initialData,
+        metadata: {
+          ...(initialData.metadata || {}),
+          lockPeriod: initialData.metadata?.lockPeriod || '1y',
+          isAnimated: initialData.metadata?.isAnimated || false
+        }
+      };
+    }
+    return initialFormData;
+  });
 
   const [newTag, setNewTag] = useState('');
   const [attachmentUrl, setAttachmentUrl] = useState('');
@@ -521,7 +536,7 @@ export default function MemoryForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 bg-white/90 backdrop-blur-xl rounded-2xl p-6 border border-white/20">
+    <form onSubmit={handleSubmit} className="space-y-6 bg-white rounded-2xl p-6 border border-gray-200 shadow-lg">
       {/* Time Capsule Details Section */}
       <div className="space-y-6 mb-8">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -534,13 +549,12 @@ export default function MemoryForm({
                 type="text"
                 value={formData.capsule_name}
                 onChange={(e) => setFormData({ ...formData, capsule_name: e.target.value })}
-                className="block w-full px-4 py-3 bg-white/50 backdrop-blur-sm border border-gray-200 rounded-xl shadow-sm 
+                className="block w-full px-4 py-3 bg-white border border-gray-200 rounded-xl shadow-sm 
                          focus:ring-2 focus:ring-indigo-500 focus:border-transparent
-                         hover:bg-white/80 transition-all duration-300"
+                         hover:bg-gray-50 transition-all duration-300"
                 placeholder="Give your capsule a meaningful name"
                 required
               />
-              <div className="absolute inset-0 bg-gradient-to-r from-indigo-600/10 to-purple-600/10 rounded-xl pointer-events-none"></div>
             </div>
           </div>
 
@@ -555,9 +569,9 @@ export default function MemoryForm({
                   ...formData,
                   metadata: { ...formData.metadata, lockPeriod: e.target.value }
                 })}
-                className="block w-full px-4 py-3 bg-white/50 backdrop-blur-sm border border-gray-200 rounded-xl shadow-sm 
+                className="block w-full px-4 py-3 bg-white border border-gray-200 rounded-xl shadow-sm 
                          focus:ring-2 focus:ring-indigo-500 focus:border-transparent
-                         hover:bg-white/80 transition-all duration-300 appearance-none"
+                         hover:bg-gray-50 transition-all duration-300 appearance-none"
               >
                 <option value="1m">1 Month</option>
                 <option value="3m">3 Months</option>
@@ -581,13 +595,12 @@ export default function MemoryForm({
             <textarea
               value={formData.capsule_description}
               onChange={(e) => setFormData({ ...formData, capsule_description: e.target.value })}
-              className="block w-full px-4 py-3 bg-white/50 backdrop-blur-sm border border-gray-200 rounded-xl shadow-sm
+              className="block w-full px-4 py-3 bg-white border border-gray-200 rounded-xl shadow-sm
                        focus:ring-2 focus:ring-indigo-500 focus:border-transparent
-                       hover:bg-white/80 transition-all duration-300"
+                       hover:bg-gray-50 transition-all duration-300"
               placeholder="What makes this time capsule special?"
               rows={3}
             />
-            <div className="absolute inset-0 bg-gradient-to-r from-indigo-600/10 to-purple-600/10 rounded-xl pointer-events-none"></div>
           </div>
         </div>
 
@@ -620,7 +633,7 @@ export default function MemoryForm({
               type="text"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              className="input bg-white/50 backdrop-blur-sm w-full"
+              className="input bg-white w-full"
               placeholder="Give your memory a title"
               required
             />
@@ -631,7 +644,7 @@ export default function MemoryForm({
             <select
               value={formData.category}
               onChange={(e) => setFormData({ ...formData, category: e.target.value as any })}
-              className="input bg-white/50 backdrop-blur-sm w-full"
+              className="input bg-white w-full"
             >
               {categories.map(cat => (
                 <option key={cat.category} value={cat.category}>
@@ -648,7 +661,7 @@ export default function MemoryForm({
             value={formData.content}
             onChange={(e) => setFormData({ ...formData, content: e.target.value })}
             rows={4}
-            className="input bg-white/50 backdrop-blur-sm w-full"
+            className="input bg-white w-full"
             placeholder="Write your memory here..."
             required
           />
@@ -661,7 +674,7 @@ export default function MemoryForm({
               type="date"
               value={formData.date}
               onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-              className="input bg-white/50 backdrop-blur-sm w-full"
+              className="input bg-white w-full"
               required
             />
           </div>
@@ -672,7 +685,7 @@ export default function MemoryForm({
               type="text"
               value={formData.location}
               onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-              className="input bg-white/50 backdrop-blur-sm w-full"
+              className="input bg-white w-full"
               placeholder="Where did this memory take place?"
             />
           </div>
@@ -685,15 +698,15 @@ export default function MemoryForm({
               type="text"
               value={formData.mood}
               onChange={(e) => setFormData({ ...formData, mood: e.target.value })}
-              className="input bg-white/50 backdrop-blur-sm w-full"
+              className="input bg-white w-full"
               placeholder="How are you feeling?"
             />
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setShowStickerPicker(!showStickerPicker)}
-                className="flex items-center gap-2 px-4 py-2 bg-white/50 backdrop-blur-sm text-indigo-600 
-                         rounded-xl border border-indigo-100 hover:bg-indigo-50 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-600 
+                         rounded-xl border border-indigo-200 hover:bg-indigo-50 transition-colors"
               >
                 <Sticker className="h-4 w-4" />
                 <span>Add Stickers</span>
@@ -701,7 +714,7 @@ export default function MemoryForm({
             </div>
             {showStickerPicker && (
               <div className="relative">
-                <div className="absolute z-10 mt-2 bg-white rounded-xl shadow-xl border border-gray-100">
+                <div className="absolute z-10 mt-2 bg-white rounded-xl shadow-xl border border-gray-200">
                   <StickerPicker
                     onSelect={handleAddSticker}
                     selectedStickers={formData.stickers}
@@ -737,7 +750,7 @@ export default function MemoryForm({
                 onChange={(e) => setNewTag(e.target.value)}
                 onKeyDown={handleTagKeyDown}
                 placeholder="Add a tag"
-                className="input bg-white/50 backdrop-blur-sm flex-1"
+                className="input bg-white flex-1"
               />
               <button
                 type="button"
@@ -785,8 +798,8 @@ export default function MemoryForm({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-2 px-4 py-2 bg-white/50 backdrop-blur-sm text-indigo-600 
-                           rounded-xl border border-indigo-100 hover:bg-indigo-50 transition-colors flex-1"
+                  className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-600 
+                           rounded-xl border border-indigo-200 hover:bg-indigo-50 transition-colors flex-1"
                   disabled={isUploading}
                 >
                   <Image className="h-5 w-5" />
@@ -795,8 +808,8 @@ export default function MemoryForm({
                 <button
                   type="button"
                   onClick={() => setShowVoiceRecorder(!showVoiceRecorder)}
-                  className="flex items-center gap-2 px-4 py-2 bg-white/50 backdrop-blur-sm text-indigo-600 
-                           rounded-xl border border-indigo-100 hover:bg-indigo-50 transition-colors flex-1"
+                  className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-600 
+                           rounded-xl border border-indigo-200 hover:bg-indigo-50 transition-colors flex-1"
                 >
                   <Mic className="h-5 w-5" />
                   Add Voice Note
@@ -874,7 +887,7 @@ export default function MemoryForm({
                 value={section.content as string}
                 onChange={(e) => handleUpdateSection(section.name, e.target.value)}
                 placeholder={section.placeholder}
-                className="input bg-white/50 backdrop-blur-sm w-full"
+                className="input bg-white w-full"
               />
             ) : section.type === 'list' ? (
               <div className="space-y-4">
@@ -887,7 +900,7 @@ export default function MemoryForm({
                       [section.name]: e.target.value
                     }))}
                     placeholder={section.placeholder}
-                    className="input bg-white/50 backdrop-blur-sm flex-1"
+                    className="input bg-white flex-1"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -912,7 +925,7 @@ export default function MemoryForm({
                   {(section.content as string[]).map((item, itemIndex) => (
                     <div
                       key={`${section.name}-item-${itemIndex}`}
-                      className="flex items-center justify-between p-3 bg-white/50 backdrop-blur-sm rounded-xl"
+                      className="flex items-center justify-between p-3 bg-white rounded-xl border border-gray-200"
                     >
                       <span className="text-gray-700">{item}</span>
                       <button

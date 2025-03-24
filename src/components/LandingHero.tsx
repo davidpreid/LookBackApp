@@ -131,8 +131,8 @@ export default function LandingHero() {
                 <div className="p-6">
                   <div className="flex items-center justify-between mb-6">
                     <div className="space-y-2">
-                      <h3 className="text-xl font-semibold text-gray-900">Summer Memories 2023</h3>
-                      <p className="text-sm text-gray-500">Unlocks on June 21, 2024</p>
+                      <h3 className="text-xl font-semibold text-gray-900">Summer Memories 2025</h3>
+                      <p className="text-sm text-gray-500">Unlocks on June 21, 2029</p>
                     </div>
                     <div className="p-3 bg-indigo-50 rounded-xl">
                       <Lock className="w-6 h-6 text-indigo-600" />
