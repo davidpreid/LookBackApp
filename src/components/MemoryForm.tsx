@@ -286,7 +286,7 @@ export default function MemoryForm({ initialData, isEditing = false, onSubmit, o
       'BookOpen': '📚',
       'Cake': '🎂',
       'Heart': '❤️',
-      'Users': '��',
+      'Users': '👥',
       'Star': '⭐',
       'Gamepad2': '🎮',
       'Trophy': '🏆',

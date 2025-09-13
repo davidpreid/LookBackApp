@@ -84,6 +84,7 @@ export default function PublicBoard() {
           if (memory.metadata?.attachments) {
             const attachmentsWithUrls = await Promise.all(
               memory.metadata.attachments.map(async (attachment: { path?: string; url?: string; type: string; name: string }) => {
+                // Generate fresh signed URL for Supabase-stored images
                 if (attachment.path) {
                   try {
                     const { data: signedUrlData } = await supabase.storage
@@ -101,6 +102,7 @@ export default function PublicBoard() {
                     return attachment;
                   }
                 }
+                // For external URLs, use the stored URL directly
                 return attachment;
               })
             );

@@ -221,14 +221,8 @@ export default function Dashboard() {
             
             const attachmentsWithUrls = await Promise.all(
               memory.metadata.attachments.map(async (attachment: { path?: string; url?: string; type: string; name: string }) => {
-                // If we already have a valid URL, use it
-                if (attachment.url) {
-                  console.log('Using existing URL:', attachment.url);
-                  return attachment;
-                }
-                
-                // Only generate a new signed URL if we have a path but no URL
-                if (attachment.path && !attachment.url) {
+                // Generate fresh signed URL for Supabase-stored images
+                if (attachment.path) {
                   console.log('Generating signed URL for path:', attachment.path);
                   const { data: signedUrlData, error: signedUrlError } = await supabase.storage
                     .from('memory-images')
@@ -248,6 +242,7 @@ export default function Dashboard() {
                   return { ...attachment, url: signedUrlData.signedUrl };
                 }
                 
+                // For external URLs, use the stored URL directly
                 return attachment;
               })
             );

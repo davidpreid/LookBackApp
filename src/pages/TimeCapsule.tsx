@@ -126,6 +126,7 @@ export default function TimeCapsule() {
             if (memory.metadata?.attachments) {
               const attachmentsWithUrls = await Promise.all(
                 memory.metadata.attachments.map(async (attachment: { path?: string; url?: string; type: string; name: string }) => {
+                  // Generate fresh signed URL for Supabase-stored images
                   if (attachment.path) {
                     const { data: signedUrlData } = await supabase.storage
                       .from('memory-images')
@@ -138,6 +139,7 @@ export default function TimeCapsule() {
                     
                     return { ...attachment, url: signedUrlData.signedUrl };
                   }
+                  // For external URLs, use the stored URL directly
                   return attachment;
                 })
               );

@@ -130,7 +130,8 @@ export default function Timeline() {
         if (memory.metadata?.attachments) {
           const processedAttachments = await Promise.all(
             memory.metadata.attachments.map(async (attachment: { url?: string; path?: string; type: string; name: string }) => {
-              if (attachment.path && !attachment.url) {
+              // Generate fresh signed URL for Supabase-stored images
+              if (attachment.path) {
                 try {
                   const { data: signedUrlData } = await supabase.storage
                     .from('memory-images')
@@ -146,6 +147,7 @@ export default function Timeline() {
                   console.error('Error generating signed URL:', error);
                 }
               }
+              // For external URLs, use the stored URL directly
               return attachment;
             })
           );
