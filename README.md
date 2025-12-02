@@ -135,4 +135,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-For support, please open an issue in the GitHub repository or contact us at support@lookbackcapsule.com Updated 01/12/2025
+For support, please open an issue in the GitHub repository or contact us at support@lookbackcapsule.com Updated 01/12/2025 15:11
